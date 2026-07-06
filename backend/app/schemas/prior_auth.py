@@ -39,8 +39,8 @@ class PriorAuthRead(BaseModel):
     denial_reason: str | None = None
     medical_necessity_letter: str | None = None
     clinical_summary: str | None = None
-    required_documents: dict | None = None
-    collected_documents: dict | None = None
+    required_documents: dict | list | None = None
+    collected_documents: dict | list | None = None
     claim_amount: float | None = None
     revenue_recovered: float | None = None
     current_agent: str | None = None

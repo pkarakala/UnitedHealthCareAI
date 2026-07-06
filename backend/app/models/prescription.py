@@ -1,4 +1,4 @@
-from sqlalchemy import String, Integer, Float, Text, Date, ForeignKey, ARRAY
+from sqlalchemy import String, Integer, Float, Text, Date, JSON, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.models.base import Base, AuditMixin
 
@@ -18,7 +18,7 @@ class Prescription(Base, AuditMixin):
     days_supply: Mapped[int | None] = mapped_column(Integer, nullable=True)
     refills: Mapped[int | None] = mapped_column(Integer, nullable=True)
     directions: Mapped[str | None] = mapped_column(Text, nullable=True)
-    diagnosis_codes: Mapped[list | None] = mapped_column(ARRAY(String), nullable=True)
+    diagnosis_codes: Mapped[list | None] = mapped_column(JSON, nullable=True)
     pharmacy_npi: Mapped[str | None] = mapped_column(String(10), nullable=True)
     date_written: Mapped[str | None] = mapped_column(Date, nullable=True)
     raw_image_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
