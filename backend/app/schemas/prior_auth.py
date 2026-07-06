@@ -1,0 +1,71 @@
+from pydantic import BaseModel
+from datetime import datetime
+from app.utils.constants import PAStatus
+
+
+class PriorAuthCreate(BaseModel):
+    patient_id: str
+    prescription_id: str
+    insurance_id: str | None = None
+    priority: int = 5
+    notes: str | None = None
+
+
+class PriorAuthUpdate(BaseModel):
+    status: str | None = None
+    sub_status: str | None = None
+    pa_number: str | None = None
+    submission_method: str | None = None
+    decision: str | None = None
+    denial_reason: str | None = None
+    notes: str | None = None
+    assigned_to: str | None = None
+    priority: int | None = None
+
+
+class PriorAuthRead(BaseModel):
+    id: str
+    patient_id: str
+    prescription_id: str
+    insurance_id: str | None = None
+    status: str
+    sub_status: str | None = None
+    pa_number: str | None = None
+    confirmation_number: str | None = None
+    submission_method: str | None = None
+    submitted_at: datetime | None = None
+    decision_at: datetime | None = None
+    decision: str | None = None
+    denial_reason: str | None = None
+    medical_necessity_letter: str | None = None
+    clinical_summary: str | None = None
+    required_documents: dict | None = None
+    collected_documents: dict | None = None
+    claim_amount: float | None = None
+    revenue_recovered: float | None = None
+    current_agent: str | None = None
+    retry_count: int
+    escalated: bool
+    assigned_to: str | None = None
+    priority: int
+    notes: str | None = None
+    created_at: datetime
+    updated_at: datetime | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class TimelineEvent(BaseModel):
+    timestamp: datetime
+    agent_name: str | None = None
+    action: str
+    status: str
+    details: dict | None = None
+    duration_ms: int | None = None
+
+
+class PriorAuthTimeline(BaseModel):
+    prior_auth_id: str
+    current_status: str
+    events: list[TimelineEvent]
+    total_duration_hours: float | None = None
