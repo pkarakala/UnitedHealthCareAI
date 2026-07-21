@@ -28,7 +28,7 @@ async def seed():
                 group_number="GRP001",
                 phone="1-800-555-0100",
                 fax="1-800-555-0101",
-                portal_url="https://provider.bcbs.com",
+                portal_url=None,
                 is_active=True,
                 formulary_data={
                     "ozempic": {"tier": 3, "pa_required": True, "step_therapy": True},

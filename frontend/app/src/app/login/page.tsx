@@ -64,7 +64,7 @@ export default function LoginPage() {
 
       {/* Footer */}
       <p className="text-[11px] text-center text-slate-400 mt-6">
-        Protected by HIPAA-compliant encryption
+        Secured with end-to-end encryption
       </p>
     </div>
   );
