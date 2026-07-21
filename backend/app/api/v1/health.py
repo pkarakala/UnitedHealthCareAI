@@ -32,3 +32,16 @@ async def readiness_check(db: AsyncSession = Depends(get_db)):
         return {"ready": True}
     except Exception as e:
         return {"ready": False, "error": str(e)}
+
+
+@router.post("/seed-demo")
+async def seed_demo_data():
+    """One-time endpoint to seed demo data. Remove in production."""
+    import subprocess
+    result = subprocess.run(
+        ["python", "scripts/seed_demo.py"],
+        capture_output=True, text=True, cwd="/app"
+    )
+    if result.returncode == 0:
+        return {"status": "success", "output": result.stdout}
+    return {"status": "error", "output": result.stderr[-500:]}
