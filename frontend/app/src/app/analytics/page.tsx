@@ -48,10 +48,10 @@ export default function AnalyticsPage() {
         <div>
           <h3 className="text-sm font-semibold text-slate-900 mb-3">Revenue & Performance</h3>
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <StatCard title="Revenue Recovered (MTD)" value={`$${(metrics?.revenue_recovered_mtd ?? 0).toLocaleString()}`} color="emerald" />
-            <StatCard title="Approval Rate" value={`${(metrics?.approval_rate ?? 0).toFixed(1)}%`} color="emerald" />
-            <StatCard title="Appeal Success" value={`${(metrics?.appeal_success_rate ?? 0).toFixed(0)}%`} color="blue" />
-            <StatCard title="Avg Turnaround" value={`${(metrics?.average_turnaround_hours ?? 0).toFixed(0)}h`} color="amber" />
+            <StatCard title="Revenue Recovered (MTD)" value={`$${(metrics?.revenue_recovered_mtd ?? 0).toLocaleString()}`} />
+            <StatCard title="Approval Rate" value={`${(metrics?.approval_rate ?? 0).toFixed(1)}%`} />
+            <StatCard title="Appeal Success" value={`${(metrics?.appeal_success_rate ?? 0).toFixed(0)}%`} />
+            <StatCard title="Avg Turnaround" value={`${(metrics?.average_turnaround_hours ?? 0).toFixed(0)}h`} />
           </div>
         </div>
 

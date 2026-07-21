@@ -1,24 +1,34 @@
+import { TrendingUp, TrendingDown } from "lucide-react";
+
 interface StatCardProps {
   title: string;
   value: string | number;
   subtitle?: string;
   trend?: "up" | "down" | "neutral";
-  color?: "emerald" | "blue" | "amber" | "red";
+  icon?: React.ReactNode;
 }
 
-const colorMap = {
-  emerald: "bg-emerald-50 text-emerald-700 border-emerald-200",
-  blue: "bg-blue-50 text-blue-700 border-blue-200",
-  amber: "bg-amber-50 text-amber-700 border-amber-200",
-  red: "bg-red-50 text-red-700 border-red-200",
-};
-
-export default function StatCard({ title, value, subtitle, color = "emerald" }: StatCardProps) {
+export default function StatCard({ title, value, subtitle, trend, icon }: StatCardProps) {
   return (
-    <div className={`rounded-xl border p-5 ${colorMap[color]}`}>
-      <p className="text-sm font-medium opacity-75">{title}</p>
-      <p className="text-3xl font-bold mt-1">{value}</p>
-      {subtitle && <p className="text-xs mt-1 opacity-60">{subtitle}</p>}
+    <div className="bg-white rounded-xl border border-slate-200/80 p-5 hover:shadow-md hover:shadow-slate-100 transition-all duration-200">
+      <div className="flex items-start justify-between">
+        <div>
+          <p className="text-[12px] font-medium text-slate-500 uppercase tracking-wider">{title}</p>
+          <p className="text-2xl font-bold text-slate-900 mt-1.5 tracking-tight">{value}</p>
+          {subtitle && (
+            <p className="text-[11px] text-slate-400 mt-1 flex items-center gap-1">
+              {trend === "up" && <TrendingUp className="w-3 h-3 text-emerald-500" />}
+              {trend === "down" && <TrendingDown className="w-3 h-3 text-red-500" />}
+              {subtitle}
+            </p>
+          )}
+        </div>
+        {icon && (
+          <div className="w-10 h-10 rounded-lg bg-slate-50 flex items-center justify-center">
+            {icon}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

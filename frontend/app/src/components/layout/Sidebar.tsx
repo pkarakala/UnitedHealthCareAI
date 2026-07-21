@@ -2,54 +2,85 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import {
+  LayoutDashboard,
+  ClipboardList,
+  PlusCircle,
+  Users,
+  Scale,
+  MessageSquare,
+  BarChart3,
+  Settings,
+  LogOut,
+  Activity,
+} from "lucide-react";
 
 const navigation = [
-  { name: "Dashboard", href: "/dashboard", icon: "📊" },
-  { name: "Prior Auths", href: "/prior-auths", icon: "📋" },
-  { name: "New Intake", href: "/prescriptions/intake", icon: "➕" },
-  { name: "Patients", href: "/patients", icon: "👤" },
-  { name: "Appeals", href: "/appeals", icon: "⚖️" },
-  { name: "Communications", href: "/communications", icon: "💬" },
-  { name: "Analytics", href: "/analytics", icon: "📈" },
-  { name: "Settings", href: "/settings", icon: "⚙️" },
+  { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+  { name: "Prior Auths", href: "/prior-auths", icon: ClipboardList },
+  { name: "New Intake", href: "/prescriptions/intake", icon: PlusCircle },
+  { name: "Patients", href: "/patients", icon: Users },
+  { name: "Appeals", href: "/appeals", icon: Scale },
+  { name: "Communications", href: "/communications", icon: MessageSquare },
+  { name: "Analytics", href: "/analytics", icon: BarChart3 },
+  { name: "Settings", href: "/settings", icon: Settings },
 ];
 
 export default function Sidebar() {
   const pathname = usePathname();
 
   return (
-    <aside className="w-64 bg-slate-900 text-white min-h-screen p-4 fixed left-0 top-0">
-      <div className="mb-8">
-        <h1 className="text-xl font-bold tracking-tight">
-          USA<span className="text-emerald-400">Healthcare</span>.AI
-        </h1>
-        <p className="text-xs text-slate-400 mt-1">Prior Auth Platform</p>
+    <aside className="w-[260px] bg-[#0f172a] text-white min-h-screen flex flex-col fixed left-0 top-0 z-50">
+      {/* Logo */}
+      <div className="px-6 py-6 border-b border-white/5">
+        <div className="flex items-center gap-2.5">
+          <div className="w-8 h-8 bg-gradient-to-br from-teal-400 to-teal-600 rounded-lg flex items-center justify-center">
+            <Activity className="w-4 h-4 text-white" />
+          </div>
+          <div>
+            <h1 className="text-[15px] font-semibold tracking-tight">
+              USA<span className="text-teal-400">Healthcare</span>
+            </h1>
+            <p className="text-[10px] text-slate-400 -mt-0.5 tracking-wide uppercase">
+              Prior Auth Platform
+            </p>
+          </div>
+        </div>
       </div>
 
-      <nav className="space-y-1">
+      {/* Navigation */}
+      <nav className="flex-1 px-3 py-4 space-y-0.5">
         {navigation.map((item) => {
           const isActive = pathname?.startsWith(item.href);
+          const Icon = item.icon;
           return (
             <Link
               key={item.name}
               href={item.href}
-              className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
+              className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-medium transition-all duration-150 ${
                 isActive
-                  ? "bg-emerald-600/20 text-emerald-400 font-medium"
-                  : "text-slate-300 hover:bg-slate-800 hover:text-white"
+                  ? "bg-teal-500/10 text-teal-400 shadow-sm shadow-teal-500/5"
+                  : "text-slate-400 hover:bg-white/5 hover:text-slate-200"
               }`}
             >
-              <span className="text-lg">{item.icon}</span>
+              <Icon className={`w-[18px] h-[18px] ${isActive ? "text-teal-400" : "text-slate-500"}`} />
               {item.name}
             </Link>
           );
         })}
       </nav>
 
-      <div className="absolute bottom-4 left-4 right-4">
-        <div className="bg-slate-800 rounded-lg p-3">
-          <p className="text-xs text-slate-400">Logged in as</p>
-          <p className="text-sm font-medium">Pharmacy Staff</p>
+      {/* User Section */}
+      <div className="px-3 pb-4 border-t border-white/5 pt-4">
+        <div className="flex items-center gap-3 px-3 py-2">
+          <div className="w-8 h-8 bg-gradient-to-br from-slate-600 to-slate-700 rounded-full flex items-center justify-center text-xs font-medium">
+            PS
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-[12px] font-medium text-slate-300 truncate">Pharmacy Staff</p>
+            <p className="text-[10px] text-slate-500 truncate">staff@pharmacy.com</p>
+          </div>
+          <LogOut className="w-4 h-4 text-slate-500 hover:text-slate-300 cursor-pointer transition-colors" />
         </div>
       </div>
     </aside>
