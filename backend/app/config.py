@@ -65,6 +65,14 @@ class Settings(BaseSettings):
     langfuse_secret_key: Optional[str] = None
     langfuse_host: str = "http://localhost:3001"
 
+    # Observability / protection
+    # Sentry is enabled only when a DSN is provided. PII/request bodies are
+    # never sent (see main.py) because requests carry PHI.
+    sentry_dsn: Optional[str] = None
+    # Global default; login gets a stricter per-route limit in auth.py.
+    rate_limit_default: str = "120/minute"
+    rate_limit_login: str = "10/minute"
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",")]

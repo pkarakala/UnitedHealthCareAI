@@ -156,6 +156,58 @@ async def test_successful_transition_bumps_lock_version(db_session):
 
 
 @pytest.mark.asyncio
+async def test_repeated_failures_escalate(db_session):
+    # A case must never stall silently: MAX_RETRIES consecutive failures on
+    # the same status flip escalated=True so it lands in the human queue.
+    pa = await _seed_pa(db_session, PAStatus.INTAKE)
+    orch = Orchestrator(db_session)
+    orch._agent_registry["pa_detection"] = _StubAgent(
+        "pa_detection", AgentResult(success=False, error="boom")
+    )
+
+    for _ in range(Orchestrator.MAX_RETRIES):
+        await orch.advance(pa.id)
+
+    await db_session.refresh(pa)
+    assert pa.status == PAStatus.INTAKE.value  # still held
+    assert pa.retry_count == Orchestrator.MAX_RETRIES
+    assert pa.escalated is True
+
+
+@pytest.mark.asyncio
+async def test_requires_human_escalates_immediately(db_session):
+    pa = await _seed_pa(db_session, PAStatus.INTAKE)
+    orch = Orchestrator(db_session)
+    orch._agent_registry["pa_detection"] = _StubAgent(
+        "pa_detection", AgentResult(success=True, requires_human=True)
+    )
+
+    await orch.advance(pa.id)
+
+    await db_session.refresh(pa)
+    assert pa.escalated is True
+    assert pa.retry_count == 1
+
+
+@pytest.mark.asyncio
+async def test_success_resets_retry_count(db_session):
+    pa = await _seed_pa(db_session, PAStatus.INTAKE)
+    pa.retry_count = 2
+    await db_session.commit()
+
+    orch = Orchestrator(db_session)
+    orch._agent_registry["pa_detection"] = _StubAgent(
+        "pa_detection", AgentResult(success=True)
+    )
+
+    await orch.advance(pa.id)
+
+    await db_session.refresh(pa)
+    assert pa.status == PAStatus.PA_DETECTION.value
+    assert pa.retry_count == 0
+
+
+@pytest.mark.asyncio
 async def test_stale_version_rejects_transition(db_session):
     # Simulates a concurrent worker having already advanced the PA: the second
     # commit sees expected_version=0 but the row is now at version 1, so it must

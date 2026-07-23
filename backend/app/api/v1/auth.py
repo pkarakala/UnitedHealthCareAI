@@ -1,11 +1,13 @@
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.database import get_db
+from app.rate_limit import limiter
 from app.models.user import User
 from app.security import (
     create_access_token,
@@ -46,7 +48,8 @@ class UserCreate(BaseModel):
 
 
 @router.post("/login", response_model=TokenResponse)
-async def login(data: LoginRequest, db: AsyncSession = Depends(get_db)):
+@limiter.limit(settings.rate_limit_login)
+async def login(request: Request, data: LoginRequest, db: AsyncSession = Depends(get_db)):
     stmt = select(User).where(User.email == data.email.lower())
     user = (await db.execute(stmt)).scalar_one_or_none()
 

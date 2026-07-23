@@ -5,6 +5,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models.prior_auth import PriorAuth
+from app.models.patient import Patient
+from app.models.prescription import Prescription
 from app.models.agent_execution import AgentExecution
 from app.schemas.prior_auth import (
     PriorAuthCreate,
@@ -42,9 +44,14 @@ async def list_prior_auths(
     escalated: bool = None,
     db: AsyncSession = Depends(get_db),
 ):
-    """List PA cases with filters."""
-    stmt = select(PriorAuth).offset(skip).limit(limit).order_by(
-        PriorAuth.created_at.desc()
+    """List PA cases with filters, joined with patient + drug display fields."""
+    stmt = (
+        select(PriorAuth, Patient, Prescription.drug_name)
+        .join(Patient, PriorAuth.patient_id == Patient.id)
+        .join(Prescription, PriorAuth.prescription_id == Prescription.id)
+        .offset(skip)
+        .limit(limit)
+        .order_by(PriorAuth.created_at.desc())
     )
     if status:
         stmt = stmt.where(PriorAuth.status == status)
@@ -53,8 +60,15 @@ async def list_prior_auths(
     if escalated is not None:
         stmt = stmt.where(PriorAuth.escalated == escalated)
 
-    result = await db.execute(stmt)
-    return result.scalars().all()
+    rows = (await db.execute(stmt)).all()
+    results = []
+    for pa, patient, drug_name in rows:
+        item = PriorAuthRead.model_validate(pa)
+        item.patient_name = f"{patient.last_name}, {patient.first_name}"
+        item.patient_dob = str(patient.date_of_birth)
+        item.drug_name = drug_name
+        results.append(item)
+    return results
 
 
 @router.get("/{pa_id}", response_model=PriorAuthRead)

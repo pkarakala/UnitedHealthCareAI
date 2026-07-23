@@ -80,9 +80,10 @@ export default function PriorAuthsPage() {
             <table className="w-full text-[13px]">
               <thead>
                 <tr className="bg-slate-50/50">
+                  <th className="px-5 py-3 text-left font-medium text-slate-500 text-[11px] uppercase tracking-wider">Patient</th>
+                  <th className="px-5 py-3 text-left font-medium text-slate-500 text-[11px] uppercase tracking-wider">Drug</th>
                   <th className="px-5 py-3 text-left font-medium text-slate-500 text-[11px] uppercase tracking-wider">Case</th>
                   <th className="px-5 py-3 text-left font-medium text-slate-500 text-[11px] uppercase tracking-wider">Status</th>
-                  <th className="px-5 py-3 text-left font-medium text-slate-500 text-[11px] uppercase tracking-wider">Agent</th>
                   <th className="px-5 py-3 text-left font-medium text-slate-500 text-[11px] uppercase tracking-wider">Priority</th>
                   <th className="px-5 py-3 text-left font-medium text-slate-500 text-[11px] uppercase tracking-wider">Decision</th>
                   <th className="px-5 py-3 text-left font-medium text-slate-500 text-[11px] uppercase tracking-wider">Age</th>
@@ -90,10 +91,10 @@ export default function PriorAuthsPage() {
               </thead>
               <tbody className="divide-y divide-slate-50">
                 {loading ? (
-                  <SkeletonRows columns={6} rows={8} />
+                  <SkeletonRows columns={7} rows={8} />
                 ) : priorAuths.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="px-5 py-16 text-center">
+                    <td colSpan={7} className="px-5 py-16 text-center">
                       <div className="flex flex-col items-center">
                         <div className="w-12 h-12 bg-slate-100 rounded-xl flex items-center justify-center mb-3">
                           <ClipboardList className="w-6 h-6 text-slate-300" />
@@ -108,6 +109,13 @@ export default function PriorAuthsPage() {
                 ) : (
                   priorAuths.map((pa) => (
                     <tr key={pa.id} className="hover:bg-slate-50/50 transition-colors">
+                      <td className="px-5 py-3">
+                        <div className="font-medium text-slate-900">{pa.patient_name || "—"}</div>
+                        {pa.patient_dob && (
+                          <div className="text-[11px] text-slate-500">DOB {pa.patient_dob}</div>
+                        )}
+                      </td>
+                      <td className="px-5 py-3 text-slate-700">{pa.drug_name || "—"}</td>
                       <td className="px-5 py-3">
                         <Link href={`/prior-auths/${pa.id}`} className="text-teal-600 hover:underline font-mono text-[12px]">
                           {pa.pa_number || pa.id.slice(0, 8)}
@@ -125,9 +133,6 @@ export default function PriorAuthsPage() {
                             <span title="Escalated"><AlertTriangle className="w-3.5 h-3.5 text-red-500" /></span>
                           )}
                         </div>
-                      </td>
-                      <td className="px-5 py-3 text-slate-600">
-                        {pa.current_agent?.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()) || "—"}
                       </td>
                       <td className="px-5 py-3">
                         <PriorityBadge priority={pa.priority} />

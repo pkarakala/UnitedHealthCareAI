@@ -58,6 +58,10 @@ class PriorAuthRead(BaseModel):
     notes: str | None = None
     created_at: datetime
     updated_at: datetime | None = None
+    # Joined display fields, populated by the list endpoint only (None elsewhere).
+    patient_name: str | None = None
+    patient_dob: str | None = None
+    drug_name: str | None = None
 
     model_config = {"from_attributes": True}
 

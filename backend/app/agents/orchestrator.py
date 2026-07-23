@@ -355,12 +355,17 @@ class Orchestrator:
             if not result.success or result.requires_human:
                 # Hold the transition: the PA stays in current_status. Its
                 # execution record (written by BaseAgent.run) captures the failure.
+                # Track the failure so the case can't stall silently: escalate
+                # immediately on requires_human, or after MAX_RETRIES failures.
+                await self._record_held_transition(pa, result)
                 logger.info(
                     "workflow.transition_held",
                     prior_auth_id=prior_auth_id,
                     status=current_status.value,
                     agent=transition.agent_name,
                     requires_human=result.requires_human,
+                    retry_count=pa.retry_count,
+                    escalated=pa.escalated,
                     error=result.error,
                 )
                 return result
@@ -433,6 +438,7 @@ class Orchestrator:
                 status=transition.next_status.value,
                 current_agent=transition.agent_name,
                 lock_version=expected_version + 1,
+                retry_count=0,
             )
         )
         result = await self.db.execute(stmt)
@@ -454,6 +460,7 @@ class Orchestrator:
         pa.status = transition.next_status.value
         pa.current_agent = transition.agent_name
         pa.lock_version = expected_version + 1
+        pa.retry_count = 0
         logger.info(
             "workflow.transition",
             prior_auth_id=pa.id,
@@ -463,6 +470,21 @@ class Orchestrator:
             condition=condition,
         )
         return True
+
+    # Consecutive agent failures on the same status before the case escalates
+    # to a human instead of waiting for another (likely also failing) retry.
+    MAX_RETRIES = 3
+
+    async def _record_held_transition(self, pa: PriorAuth, result: AgentResult) -> None:
+        """
+        A held transition must never strand the case silently. requires_human
+        escalates immediately; plain failures escalate after MAX_RETRIES.
+        Successful transitions reset the counter via _commit_transition.
+        """
+        pa.retry_count = (pa.retry_count or 0) + 1
+        if result.requires_human or pa.retry_count >= self.MAX_RETRIES:
+            pa.escalated = True
+        await self.db.commit()
 
     async def trigger_agent(self, prior_auth_id: str, agent_name: str, force: bool = False) -> AgentResult:
         """Manually trigger a specific agent on a PA case."""

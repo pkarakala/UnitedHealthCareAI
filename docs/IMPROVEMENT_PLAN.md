@@ -115,8 +115,12 @@ that exists. For a healthcare startup, the gap between claims and reality is the
   raise (`approval.py:88`). Validate with Pydantic; retry on parse failure.
   *(Session B: retries on parse failure, guarantees a dict, optional Pydantic
   schema, robust fence stripping; `float(revenue)` → `_coerce_money`.)*
-- [ ] 🟡 Error-path conditions are dead code — agents return `success=False` with
+- [x] 🟡 Error-path conditions are dead code — agents return `success=False` with
   a condition, but `advance()` only advances on success → silent stalls.
+  *(Session E: held transitions now increment `retry_count`;
+  `requires_human` escalates immediately, plain failures escalate after
+  MAX_RETRIES=3 — the case lands in the escalated queue instead of
+  stalling silently. Successful transitions reset the counter. 3 new tests.)*
 - [x] 🟡 `crontab(minute="*/120")` (`celery_app.py:26`) is invalid (minutes 0-59);
   runs hourly, not every 2h. *(Session B: `crontab(minute=0, hour="*/2")`.)*
 - [x] 🟡 `PriorAuthUpdate` allows arbitrary status/decision writes via PUT,
@@ -126,8 +130,8 @@ that exists. For a healthcare startup, the gap between claims and reality is the
   failure) — run `alembic upgrade head` in the container instead.
   *(Done in Session A: start.sh stamps legacy create_all DBs at 001, then upgrades.)*
 - [x] 🟡 `/health` hardcodes `redis="connected"`; actually ping Redis.
-- [ ] 🟡 Missing FK indexes (communications/documents/appeals/agent_executions
-  → prior_auth_id); add a migration.
+- [x] 🟡 Missing FK indexes (communications/documents/appeals/agent_executions
+  → prior_auth_id); add a migration. *(Session E: migration 006.)*
 - [ ] 🟡 Analytics endpoints return hardcoded/fabricated numbers
   (`analytics.py:48-56, 80-87`; "approved_today" is actually all-time). Compute
   real values or label clearly.
@@ -136,9 +140,12 @@ that exists. For a healthcare startup, the gap between claims and reality is the
 - [ ] ⚪ Test suite is 20 trivial tests; one asserts the insurance stub returns
   stub data. Add tests for: auth, webhooks, JSON-parse failure, orchestrator
   cycle guard, encryption round-trip.
-- [ ] ⚪ Docker runs as root; add non-root user, `.dockerignore` (venv/test DBs
+- [x] ⚪ Docker runs as root; add non-root user, `.dockerignore` (venv/test DBs
   currently baked into the image via `COPY . .`), and a HEALTHCHECK. No CI at
   all — add GitHub Actions (lint + tests + docker build on PR).
+  *(Session E: non-root `appuser`, .dockerignore, curl HEALTHCHECK on
+  /api/v1/health, `/data/uploads` volume mount point pre-created;
+  `.github/workflows/ci.yml` runs pytest + tsc + next build + docker build.)*
 - [ ] 🟡 **README claims OCR/Vision but no image bytes are ever sent to Claude** —
   `prescription_intake.py` builds a plain-text prompt; uploads are never written
   to disk; Dockerfile installs tesseract/poppler that no code uses. Implement
@@ -421,3 +428,30 @@ IDs, KPI selection on dashboard, illustrated empty states, agent timeline concep
   - **Still remaining:** patient/drug columns in queue (backend join needed),
     pagination controls, patient typeahead on intake form, CI setup, docs
     truth pass (README/ARCHITECTURE).
+- 2026-07-23 — **Session E (production hardening) complete:**
+  - **Error-path escalation** (orchestrator): held transitions increment
+    `retry_count`; `requires_human` escalates immediately; plain failures
+    escalate after MAX_RETRIES=3. Success resets the counter. Cases can no
+    longer stall silently. +3 tests (67 total, all passing).
+  - **Queue identity columns**: `/prior-auths` list endpoint joins Patient +
+    Prescription; returns `patient_name` ("Last, First"), `patient_dob`,
+    `drug_name`. Queue UI shows Patient (+DOB) and Drug columns first.
+  - **FK indexes**: migration 006 — prior_auth_id on communications,
+    clinical_documents, appeals, agent_executions.
+  - **Rate limiting**: slowapi via Redis (fail-open with in-memory fallback);
+    default 120/min, login 10/min. `RATE_LIMIT_DEFAULT`/`RATE_LIMIT_LOGIN`
+    settings.
+  - **Sentry**: env-gated via `SENTRY_DSN`; `send_default_pii=False`,
+    request bodies never sent (PHI safety), 10% trace sampling.
+  - **Worker service**: `start-worker.sh` (celery worker -B); DEPLOYMENT.md
+    §1.3b documents the Railway worker service setup; §1.3a documents the
+    Railway volume for uploads (`/data/uploads` + `UPLOAD_DIR`).
+  - **Docker hardening**: non-root user, .dockerignore, HEALTHCHECK, curl
+    added for the healthcheck, `/data/uploads` pre-created with ownership.
+  - **CI**: `.github/workflows/ci.yml` — backend pytest, frontend tsc +
+    build, docker build on push/PR to main.
+  - **Deferred:** pagination controls, patient typeahead, docs truth pass
+    (README/ARCHITECTURE), repo rename, vision intake, backup automation.
+  - **Production blockers remaining (non-code):** HIPAA hosting migration
+    (Railway → GCP/Azure/Aptible + BAAs incl. Anthropic), real integrations
+    (CoverMyMeds/Surescripts ePA, eligibility, fax).

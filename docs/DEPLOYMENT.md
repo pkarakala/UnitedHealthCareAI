@@ -39,21 +39,48 @@
    CORS_ORIGINS=http://localhost:3000,https://app.usahealthcare.ai
    APP_ENV=production
    LOG_LEVEL=INFO
+   SENTRY_DSN=                     # optional; enables error reporting (PII/bodies never sent)
+   UPLOAD_DIR=/data/uploads        # required once the volume (1.3a) is attached
    ```
 
-> **File storage:** uploaded documents/images are written to `UPLOAD_DIR`
-> (default `uploads/`) on the local filesystem. Railway's filesystem is
-> **ephemeral** — uploads are lost on redeploy. For production PHI retention,
-> mount a persistent volume or add an S3-backed storage backend
-> (`app/services/storage.py` is written to that interface).
+### 1.3a File storage — Railway Volume (required for production)
 
-> **Workflow execution:** by default (`ASYNC_WORKFLOW` unset/false) the PA
-> workflow runs inline in the intake request. The Railway web service runs
-> only uvicorn — there is **no Celery worker** — so do **not** set
-> `ASYNC_WORKFLOW=true` unless you also add a worker service running
-> `celery -A app.celery_app worker` (and `celery -A app.celery_app beat` for
-> the scheduled monitoring/followup tasks). With async enabled and no worker,
-> new PAs are queued but never processed.
+Uploaded documents/images are written to `UPLOAD_DIR` (default `uploads/`).
+Railway's filesystem is **ephemeral** — without a volume, uploads are lost on
+every redeploy. Mount a persistent volume:
+
+1. In your Railway project, right-click the backend service → **"Attach Volume"**
+   (or **Settings** → **Volumes** → **"Add Volume"**)
+2. Set **Mount Path** to `/data/uploads`
+3. Add the variable: `UPLOAD_DIR=/data/uploads`
+4. Redeploy. Uploads now survive redeploys.
+
+Note: a volume attaches to a single service instance (fine for the worker-less
+or single-replica setup). `app/services/storage.py` is written to a storage
+interface if an object-store backend is added later.
+
+### 1.3b Worker service (required for scheduled tasks / async workflow)
+
+The web service runs only uvicorn. Status polling, follow-ups, and
+`ASYNC_WORKFLOW=true` all require a Celery worker:
+
+1. In your Railway project, click **"+ New"** → **"Empty Service"**
+2. Point it at the **same GitHub repo**, Root Directory `backend`,
+   Builder Dockerfile
+3. **Settings** → **Deploy** → **Custom Start Command:** `bash start-worker.sh`
+   (runs Celery worker + beat in one process)
+4. **Variables:** reference the same `DATABASE_URL`, `REDIS_URL`, and copy the
+   same app secrets as the web service (`SECRET_KEY`, `ENCRYPTION_KEY`,
+   `ENCRYPTION_SALT`, `ANTHROPIC_API_KEY`, `APP_ENV=production`)
+5. If the volume from 1.3a is needed by worker tasks that touch uploads,
+   note a Railway volume mounts to **one** service — keep upload handling in
+   the web service, or move to an object store when both need it.
+
+Once the worker is live you may set `ASYNC_WORKFLOW=true` on the web service
+so the PA workflow runs out-of-band instead of inside the HTTP request.
+
+> With async enabled and **no** worker, new PAs are queued but never
+> processed — leave `ASYNC_WORKFLOW` unset unless the worker service exists.
 
 ### 1.4 Add PostgreSQL
 1. In your Railway project, click **"+ New"** → **"Database"** → **"PostgreSQL"**

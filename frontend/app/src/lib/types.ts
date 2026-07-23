@@ -177,6 +177,10 @@ export interface PriorAuth {
   notes: string | null;
   created_at: string;
   updated_at: string | null;
+  // Joined display fields — populated by the list endpoint only.
+  patient_name: string | null;
+  patient_dob: string | null;
+  drug_name: string | null;
 }
 
 export interface TimelineEvent {
