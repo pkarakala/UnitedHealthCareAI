@@ -15,6 +15,7 @@ from app.schemas.prior_auth import (
 )
 from app.schemas.agent import AgentTriggerRequest
 from app.agents.orchestrator import Orchestrator
+from app.services.audit_service import AuditContext, get_audit_context
 
 router = APIRouter()
 
@@ -57,11 +58,17 @@ async def list_prior_auths(
 
 
 @router.get("/{pa_id}", response_model=PriorAuthRead)
-async def get_prior_auth(pa_id: str, db: AsyncSession = Depends(get_db)):
+async def get_prior_auth(
+    pa_id: str,
+    db: AsyncSession = Depends(get_db),
+    audit: AuditContext = Depends(get_audit_context),
+):
     """Get a single PA case."""
     pa = await db.get(PriorAuth, pa_id)
     if not pa:
         raise HTTPException(status_code=404, detail="Prior authorization not found")
+    await audit.record("read", "prior_auth", resource_id=pa_id)
+    await db.commit()
     return pa
 
 
@@ -70,6 +77,7 @@ async def update_prior_auth(
     pa_id: str,
     data: PriorAuthUpdate,
     db: AsyncSession = Depends(get_db),
+    audit: AuditContext = Depends(get_audit_context),
 ):
     """Update a PA case."""
     pa = await db.get(PriorAuth, pa_id)
@@ -80,17 +88,27 @@ async def update_prior_auth(
     for field, value in update_data.items():
         setattr(pa, field, value)
 
+    await audit.record(
+        "update", "prior_auth", resource_id=pa_id,
+        details={"fields": list(update_data.keys())},
+    )
     await db.commit()
     await db.refresh(pa)
     return pa
 
 
 @router.get("/{pa_id}/timeline", response_model=PriorAuthTimeline)
-async def get_pa_timeline(pa_id: str, db: AsyncSession = Depends(get_db)):
+async def get_pa_timeline(
+    pa_id: str,
+    db: AsyncSession = Depends(get_db),
+    audit: AuditContext = Depends(get_audit_context),
+):
     """Get the execution timeline for a PA case."""
     pa = await db.get(PriorAuth, pa_id)
     if not pa:
         raise HTTPException(status_code=404, detail="Prior authorization not found")
+    await audit.record("read", "prior_auth_timeline", resource_id=pa_id)
+    await db.commit()
 
     stmt = select(AgentExecution).where(
         AgentExecution.prior_auth_id == pa_id
@@ -173,7 +191,11 @@ async def advance_workflow(
 
 
 @router.post("/{pa_id}/cancel")
-async def cancel_prior_auth(pa_id: str, db: AsyncSession = Depends(get_db)):
+async def cancel_prior_auth(
+    pa_id: str,
+    db: AsyncSession = Depends(get_db),
+    audit: AuditContext = Depends(get_audit_context),
+):
     """Cancel a PA case."""
     pa = await db.get(PriorAuth, pa_id)
     if not pa:
@@ -181,6 +203,7 @@ async def cancel_prior_auth(pa_id: str, db: AsyncSession = Depends(get_db)):
 
     pa.status = "cancelled"
     pa.current_agent = None
+    await audit.record("cancel", "prior_auth", resource_id=pa_id, phi_accessed=False)
     await db.commit()
 
     return {"message": "Prior authorization cancelled", "id": pa_id}
@@ -191,6 +214,7 @@ async def escalate_prior_auth(
     pa_id: str,
     assigned_to: str = Query(None),
     db: AsyncSession = Depends(get_db),
+    audit: AuditContext = Depends(get_audit_context),
 ):
     """Escalate a PA case to human review."""
     pa = await db.get(PriorAuth, pa_id)
@@ -201,6 +225,10 @@ async def escalate_prior_auth(
     pa.sub_status = "escalated_to_human"
     if assigned_to:
         pa.assigned_to = assigned_to
+    await audit.record(
+        "escalate", "prior_auth", resource_id=pa_id,
+        details={"assigned_to": assigned_to}, phi_accessed=False,
+    )
     await db.commit()
 
     return {"message": "Prior authorization escalated", "id": pa_id, "assigned_to": assigned_to}

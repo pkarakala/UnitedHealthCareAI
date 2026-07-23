@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models.clinical_document import ClinicalDocument
+from app.services.audit_service import AuditContext, get_audit_context
 
 router = APIRouter()
 
@@ -68,10 +69,17 @@ async def list_documents(
 
 
 @router.get("/{doc_id}/download")
-async def download_document(doc_id: str, db: AsyncSession = Depends(get_db)):
+async def download_document(
+    doc_id: str,
+    db: AsyncSession = Depends(get_db),
+    audit: AuditContext = Depends(get_audit_context),
+):
     doc = await db.get(ClinicalDocument, doc_id)
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
+
+    await audit.record("download", "clinical_document", resource_id=doc_id)
+    await db.commit()
 
     return {
         "document_id": doc.id,

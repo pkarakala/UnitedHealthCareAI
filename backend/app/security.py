@@ -1,7 +1,7 @@
 from datetime import datetime, timezone, timedelta
 
 import bcrypt
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import JWTError, jwt
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,6 +30,7 @@ def verify_token(token: str) -> dict | None:
 
 
 async def get_current_user(
+    request: Request,
     credentials: HTTPAuthorizationCredentials = Depends(security),
     db: AsyncSession = Depends(get_db),
 ) -> User:
@@ -49,6 +50,10 @@ async def get_current_user(
     user = await db.get(User, payload["sub"])
     if not user or not user.is_active:
         raise unauthorized
+
+    # Stash on request.state so AuditContext can attribute PHI access to this
+    # user without every endpoint having to depend on get_current_user directly.
+    request.state.user = user
     return user
 
 
