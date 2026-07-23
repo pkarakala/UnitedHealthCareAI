@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import Header from "@/components/layout/Header";
-import { StatCard, StatusBadge, Spinner, ErrorBanner, PriorityBadge } from "@/components/ui";
+import { StatCard, StatusBadge, SkeletonRows, ErrorBanner, PriorityBadge, UpdatedAgo } from "@/components/ui";
+import { usePolling } from "@/hooks/usePolling";
 import { api } from "@/lib/api";
 import type { DashboardMetrics, PriorAuth } from "@/lib/types";
 import {
@@ -24,9 +25,8 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  async function load() {
+  const load = useCallback(async () => {
     setError(null);
-    setLoading(true);
     try {
       const [m, pas] = await Promise.all([
         api.analytics.dashboard(),
@@ -39,18 +39,11 @@ export default function DashboardPage() {
     } finally {
       setLoading(false);
     }
-  }
+  }, []);
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [load]);
 
-  if (loading) {
-    return (
-      <>
-        <Header title="Dashboard" />
-        <Spinner label="Loading dashboard..." />
-      </>
-    );
-  }
+  const { lastUpdated, refresh } = usePolling(load, { interval: 30_000 });
 
   const needsAttention = recentPAs.filter(
     (pa) => pa.escalated || pa.status === "error" || pa.status === "awaiting_records" || pa.status === "doctor_outreach"
@@ -87,7 +80,7 @@ export default function DashboardPage() {
                       </span>
                     )}
                   </div>
-                  <span className="text-[11px] text-amber-600">
+                  <span className={`text-[11px] font-medium ${getAgeColor(pa.created_at)}`}>
                     {formatAge(pa.created_at)}
                   </span>
                 </Link>
@@ -153,14 +146,17 @@ export default function DashboardPage() {
           <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
             <div>
               <h3 className="text-[14px] font-semibold text-slate-900">Recent Prior Authorizations</h3>
-              <p className="text-[12px] text-slate-400 mt-0.5">Latest PA cases across all statuses</p>
+              <p className="text-[12px] text-slate-500 mt-0.5">Latest PA cases across all statuses</p>
             </div>
-            <Link
-              href="/prior-auths"
-              className="text-[12px] font-medium text-teal-600 hover:text-teal-700 flex items-center gap-1 transition-colors"
-            >
-              View all <ArrowRight className="w-3 h-3" />
-            </Link>
+            <div className="flex items-center gap-4">
+              <UpdatedAgo lastUpdated={lastUpdated} onRefresh={refresh} />
+              <Link
+                href="/prior-auths"
+                className="text-[12px] font-medium text-teal-600 hover:text-teal-700 flex items-center gap-1 transition-colors"
+              >
+                View all <ArrowRight className="w-3 h-3" />
+              </Link>
+            </div>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-[13px]">
@@ -174,7 +170,9 @@ export default function DashboardPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
-                {recentPAs.length === 0 ? (
+                {loading ? (
+                  <SkeletonRows columns={5} rows={6} />
+                ) : recentPAs.length === 0 ? (
                   <tr>
                     <td colSpan={5} className="px-5 py-16 text-center">
                       <div className="flex flex-col items-center">
@@ -182,7 +180,7 @@ export default function DashboardPage() {
                           <FileText className="w-6 h-6 text-slate-300" />
                         </div>
                         <p className="text-sm font-medium text-slate-500">No prior authorizations yet</p>
-                        <p className="text-[12px] text-slate-400 mt-1">Start by intaking a new prescription</p>
+                        <p className="text-[12px] text-slate-500 mt-1">Start by intaking a new prescription</p>
                         <Link
                           href="/prescriptions/intake"
                           className="mt-4 inline-flex items-center gap-2 px-4 py-2 bg-teal-600 text-white text-[12px] font-medium rounded-lg hover:bg-teal-700 transition-colors"
@@ -210,7 +208,7 @@ export default function DashboardPage() {
                       <td className="px-5 py-3">
                         <PriorityBadge priority={pa.priority} />
                       </td>
-                      <td className="px-5 py-3 text-slate-400 text-[12px]">
+                      <td className={`px-5 py-3 text-[12px] font-medium ${getAgeColor(pa.created_at)}`}>
                         {formatAge(pa.created_at)}
                       </td>
                     </tr>
@@ -232,4 +230,11 @@ function formatAge(dateStr: string): string {
   if (hours < 24) return `${hours}h`;
   const days = Math.floor(hours / 24);
   return `${days}d`;
+}
+
+function getAgeColor(dateStr: string): string {
+  const hours = (Date.now() - new Date(dateStr).getTime()) / 3_600_000;
+  if (hours > 72) return "text-red-600";
+  if (hours > 24) return "text-amber-600";
+  return "text-slate-400";
 }

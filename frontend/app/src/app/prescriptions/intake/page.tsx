@@ -149,7 +149,7 @@ export default function IntakePage() {
                 </div>
                 <div>
                   <h3 className="text-[14px] font-semibold text-slate-900">Submit & Start Workflow</h3>
-                  <p className="text-[12px] text-slate-400">AI agents will process this prescription automatically</p>
+                  <p className="text-[12px] text-slate-500">AI agents will process this prescription automatically</p>
                 </div>
               </div>
               <button

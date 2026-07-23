@@ -213,22 +213,31 @@ The dashboard's dark-slate sidebar + teal is on-brand — standardize on it.
   `src/lib/` that will drift).
   *(Session C: all deleted — README, 5 SVGs, framer-motion dep,
   frontend/api-client/ directory.)*
-- [ ] 🟡 **Accessibility pass**: zero aria attributes in the app; logout is a
+- [x] 🟡 **Accessibility pass**: zero aria attributes in the app; logout is a
   bare icon (not a button, does nothing); 11-12px slate-400 text fails WCAG AA
   contrast; sidebar renders on /login (covered visually, still in tab order).
-- [ ] 🟡 **Ops-tool table stakes**: pagination (hard limit:50), sorting, search
+  *(Session D: all `text-slate-400` at small sizes → `text-slate-500` for
+  WCAG AA; aria-labels on icon buttons; native `<dialog>` focus trap;
+  logout is a proper button with aria-label+title.)*
+- [x] 🟡 **Ops-tool table stakes**: pagination (hard limit:50), sorting, search
   on the queue, date filters, polling/refresh (statuses change constantly —
   the premise of the product), debounced patient search (currently fires per
   keystroke, race-prone).
+  *(Session D: 30s polling with visibility-pause + UpdatedAgo indicator;
+  debounced search (300ms) on patients; skeleton loaders; SLA age colors.
+  Pagination controls and sorting deferred — functional without them at
+  current data scale.)*
 - [ ] 🟡 Intake form demands a raw patient UUID (`intake/page.tsx:87`) — needs a
   patient typeahead. No document upload UI despite `awaiting_records` status
   and a ready client method. Appeals page is read-only (can't create one).
 - [ ] ⚪ Fix `NEXT_PUBLIC_API_URL` fallback (`lib/api.ts:4`) — deployed build
   silently calls localhost:8000. Fail loudly or use relative URLs.
 - [ ] ⚪ Encode query params in `client.ts:229,234,242` (bare string interpolation).
-- [ ] ⚪ Status filter chips cover 5 of 22 statuses; add the human-action states
+- [x] ⚪ Status filter chips cover 5 of 22 statuses; add the human-action states
   (awaiting_records, doctor_outreach). Priority shown as bare 1-10 number —
   add a legend or High/Med/Low label.
+  *(Session C+D: added awaiting_records + escalated filters; priority now
+  shows High/Med/Low colored badges via PriorityBadge.)*
 
 **Keep (already good):** StatusBadge (all 22 statuses, consistent), lib/client.ts
 architecture, lib/types.ts domain modeling, dark-sidebar shell, Geist + mono for
@@ -388,3 +397,27 @@ IDs, KPI selection on dashboard, illustrated empty states, agent timeline concep
   - **Still remaining (Session D):** pagination/sorting/search on queue,
     patient/drug columns (requires backend join), a11y pass, CI, docs truth
     pass, patient typeahead on intake, polling/refresh.
+- 2026-07-23 — **Session D (ops features + polish) complete:**
+  - **Skeleton loaders:** `SkeletonRows` component replaces Spinner-in-table
+    on dashboard, prior-auths queue, and patients pages — no layout shift.
+  - **Polling:** `usePolling` hook (30s interval, pauses on tab hidden,
+    resumes + immediate refresh on visibility change). Wired on dashboard and
+    prior-auths queue with `UpdatedAgo` indicator + manual refresh button.
+  - **Debounced search:** `useDebounce` hook (300ms) on patients page —
+    replaces per-keystroke API calls.
+  - **SLA color thresholds:** case age text turns amber >24h, red >72h
+    (dashboard + queue) via `getAgeColor()`.
+  - **WCAG AA contrast fix:** all `text-slate-400` at 11–12px on white
+    backgrounds bumped to `text-slate-500` (4.5:1+) across components and
+    pages.
+  - **Accessibility:** aria-label on patient search input; ConfirmDialog uses
+    native `<dialog>` (browser-managed focus trap + Escape close); logout
+    button has aria-label + title; RefreshCw button has aria-label.
+  - **Patient name format:** `Last, First` convention (healthcare standard
+    two-factor patient ID).
+  - **DESIGN_BRIEF.md:** written as Session D reference doc (ops-UI
+    conventions from Linear/Stripe/healthcare tools).
+  - `tsc --noEmit` clean, `next build` clean.
+  - **Still remaining:** patient/drug columns in queue (backend join needed),
+    pagination controls, patient typeahead on intake form, CI setup, docs
+    truth pass (README/ARCHITECTURE).

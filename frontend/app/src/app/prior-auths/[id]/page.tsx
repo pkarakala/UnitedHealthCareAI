@@ -250,11 +250,11 @@ export default function PriorAuthDetailPage() {
                       <p className="text-[13px] font-medium text-slate-900 truncate">
                         {event.agent_name?.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase())}
                       </p>
-                      <span className="text-[11px] text-slate-400 shrink-0">
+                      <span className="text-[11px] text-slate-500 shrink-0">
                         {event.duration_ms ? `${event.duration_ms}ms` : ""}
                       </span>
                     </div>
-                    <p className="text-[11px] text-slate-400 mt-0.5">
+                    <p className="text-[11px] text-slate-500 mt-0.5">
                       {new Date(event.timestamp).toLocaleString()}
                     </p>
                   </div>

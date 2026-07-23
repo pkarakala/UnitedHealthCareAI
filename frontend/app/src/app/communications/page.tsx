@@ -65,7 +65,7 @@ export default function CommunicationsPage() {
                           <MessageSquare className="w-6 h-6 text-slate-300" />
                         </div>
                         <p className="text-sm font-medium text-slate-500">No communications yet</p>
-                        <p className="text-[12px] text-slate-400 mt-1">Communications are created during PA processing</p>
+                        <p className="text-[12px] text-slate-500 mt-1">Communications are created during PA processing</p>
                       </div>
                     </td>
                   </tr>
@@ -91,7 +91,7 @@ export default function CommunicationsPage() {
                           {c.status}
                         </span>
                       </td>
-                      <td className="px-5 py-3 text-slate-400 text-[12px]">
+                      <td className="px-5 py-3 text-slate-500 text-[12px]">
                         {c.sent_at ? new Date(c.sent_at).toLocaleString() : "—"}
                       </td>
                       <td className="px-5 py-3">

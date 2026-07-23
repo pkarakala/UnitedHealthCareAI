@@ -98,7 +98,7 @@ export default function LoginPage() {
       </form>
 
       {/* Footer */}
-      <p className="text-[11px] text-center text-slate-400 mt-6">
+      <p className="text-[11px] text-center text-slate-500 mt-6">
         Access restricted to authorized pharmacy staff
       </p>
     </div>

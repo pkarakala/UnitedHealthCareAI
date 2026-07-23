@@ -57,7 +57,7 @@ export default function AppealsPage() {
                           <Scale className="w-6 h-6 text-slate-300" />
                         </div>
                         <p className="text-sm font-medium text-slate-500">No appeals yet</p>
-                        <p className="text-[12px] text-slate-400 mt-1">Appeals are created when a PA is denied</p>
+                        <p className="text-[12px] text-slate-500 mt-1">Appeals are created when a PA is denied</p>
                       </div>
                     </td>
                   </tr>
@@ -81,7 +81,7 @@ export default function AppealsPage() {
                       </td>
                       <td className="px-5 py-3 text-slate-600 max-w-xs truncate">{a.denial_reason || "—"}</td>
                       <td className="px-5 py-3 text-slate-700 font-medium">{a.decision || "Pending"}</td>
-                      <td className="px-5 py-3 text-slate-400 text-[12px]">{new Date(a.created_at).toLocaleDateString()}</td>
+                      <td className="px-5 py-3 text-slate-500 text-[12px]">{new Date(a.created_at).toLocaleDateString()}</td>
                     </tr>
                   ))
                 )}

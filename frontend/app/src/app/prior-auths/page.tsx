@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import Header from "@/components/layout/Header";
-import { StatusBadge, PriorityBadge, Spinner, ErrorBanner } from "@/components/ui";
+import { StatusBadge, PriorityBadge, SkeletonRows, ErrorBanner, UpdatedAgo } from "@/components/ui";
+import { usePolling } from "@/hooks/usePolling";
 import { api } from "@/lib/api";
 import type { PriorAuth } from "@/lib/types";
 import { ClipboardList, AlertTriangle } from "lucide-react";
@@ -25,9 +26,8 @@ export default function PriorAuthsPage() {
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
 
-  async function load() {
+  const load = useCallback(async () => {
     setError(null);
-    setLoading(true);
     try {
       const params: Record<string, string | number | boolean> = { limit: 50 };
       if (filter === "escalated") {
@@ -42,9 +42,11 @@ export default function PriorAuthsPage() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [filter]);
 
-  useEffect(() => { load(); }, [filter]);
+  useEffect(() => { load(); }, [load]);
+
+  const { lastUpdated, refresh } = usePolling(load, { interval: 30_000 });
 
   return (
     <>
@@ -52,21 +54,24 @@ export default function PriorAuthsPage() {
       <div className="p-6 space-y-4">
         {error && <ErrorBanner message={error} onRetry={load} />}
 
-        {/* Filters */}
-        <div className="flex gap-2 flex-wrap">
-          {STATUS_FILTERS.map((s) => (
-            <button
-              key={s}
-              onClick={() => setFilter(s)}
-              className={`px-3 py-1.5 rounded-lg text-[12px] font-medium transition-colors ${
-                filter === s
-                  ? "bg-teal-600 text-white"
-                  : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-50"
-              }`}
-            >
-              {s === "" ? "All" : s === "escalated" ? "Escalated" : s.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())}
-            </button>
-          ))}
+        {/* Toolbar */}
+        <div className="flex items-center justify-between gap-4 flex-wrap">
+          <div className="flex gap-2 flex-wrap">
+            {STATUS_FILTERS.map((s) => (
+              <button
+                key={s}
+                onClick={() => setFilter(s)}
+                className={`px-3 py-1.5 rounded-lg text-[12px] font-medium transition-colors ${
+                  filter === s
+                    ? "bg-teal-600 text-white"
+                    : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-50"
+                }`}
+              >
+                {s === "" ? "All" : s === "escalated" ? "Escalated" : s.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())}
+              </button>
+            ))}
+          </div>
+          <UpdatedAgo lastUpdated={lastUpdated} onRefresh={refresh} />
         </div>
 
         {/* Table */}
@@ -85,9 +90,7 @@ export default function PriorAuthsPage() {
               </thead>
               <tbody className="divide-y divide-slate-50">
                 {loading ? (
-                  <tr>
-                    <td colSpan={6}><Spinner label="Loading..." /></td>
-                  </tr>
+                  <SkeletonRows columns={6} rows={8} />
                 ) : priorAuths.length === 0 ? (
                   <tr>
                     <td colSpan={6} className="px-5 py-16 text-center">
@@ -96,7 +99,7 @@ export default function PriorAuthsPage() {
                           <ClipboardList className="w-6 h-6 text-slate-300" />
                         </div>
                         <p className="text-sm font-medium text-slate-500">No prior authorizations found</p>
-                        <p className="text-[12px] text-slate-400 mt-1">
+                        <p className="text-[12px] text-slate-500 mt-1">
                           {filter ? "Try a different filter" : "Start by intaking a new prescription"}
                         </p>
                       </div>
@@ -130,7 +133,9 @@ export default function PriorAuthsPage() {
                         <PriorityBadge priority={pa.priority} />
                       </td>
                       <td className="px-5 py-3 text-slate-600">{pa.decision || "—"}</td>
-                      <td className="px-5 py-3 text-slate-400 text-[12px]">{formatAge(pa.created_at)}</td>
+                      <td className={`px-5 py-3 text-[12px] font-medium ${getAgeColor(pa.created_at)}`}>
+                        {formatAge(pa.created_at)}
+                      </td>
                     </tr>
                   ))
                 )}
@@ -150,4 +155,11 @@ function formatAge(dateStr: string): string {
   if (hours < 24) return `${hours}h`;
   const days = Math.floor(hours / 24);
   return `${days}d`;
+}
+
+function getAgeColor(dateStr: string): string {
+  const hours = (Date.now() - new Date(dateStr).getTime()) / 3_600_000;
+  if (hours > 72) return "text-red-600";
+  if (hours > 24) return "text-amber-600";
+  return "text-slate-400";
 }

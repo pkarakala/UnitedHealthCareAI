@@ -1,7 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import Header from "@/components/layout/Header";
+import { Button, Input, SkeletonRows, ErrorBanner } from "@/components/ui";
+import { useDebounce } from "@/hooks/useDebounce";
 import { api } from "@/lib/api";
 import type { Patient } from "@/lib/types";
 import { Users, Plus, Search, X } from "lucide-react";
@@ -9,23 +11,24 @@ import { Users, Plus, Search, X } from "lucide-react";
 export default function PatientsPage() {
   const [patients, setPatients] = useState<Patient[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [showForm, setShowForm] = useState(false);
+  const debouncedSearch = useDebounce(search, 300);
 
-  useEffect(() => {
-    loadPatients();
-  }, [search]);
-
-  async function loadPatients() {
+  const loadPatients = useCallback(async () => {
+    setError(null);
     try {
-      const data = await api.patients.list({ search: search || undefined });
+      const data = await api.patients.list({ search: debouncedSearch || undefined });
       setPatients(data);
     } catch (e) {
-      console.error(e);
+      setError(e instanceof Error ? e.message : "Failed to load patients");
     } finally {
       setLoading(false);
     }
-  }
+  }, [debouncedSearch]);
+
+  useEffect(() => { loadPatients(); }, [loadPatients]);
 
   async function handleCreate(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -42,16 +45,18 @@ export default function PatientsPage() {
       setShowForm(false);
       loadPatients();
     } catch (e) {
-      console.error(e);
+      setError(e instanceof Error ? e.message : "Failed to create patient");
     }
   }
 
   return (
     <>
       <Header title="Patients" />
-      <div className="p-8 space-y-6 max-w-[1400px]">
+      <div className="p-6 space-y-5 max-w-[1400px]">
+        {error && <ErrorBanner message={error} onRetry={loadPatients} />}
+
         {/* Controls */}
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-4">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
             <input
@@ -59,87 +64,85 @@ export default function PatientsPage() {
               placeholder="Search by name or member ID..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="pl-10 pr-4 py-2.5 border border-slate-200 rounded-lg text-sm w-72 focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 transition-all"
+              aria-label="Search patients"
+              className="pl-10 pr-4 py-2.5 border border-slate-200 rounded-lg text-[13px] w-72 focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 transition-all"
             />
           </div>
-          <button
+          <Button
+            variant={showForm ? "secondary" : "primary"}
+            icon={showForm ? <X className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
             onClick={() => setShowForm(!showForm)}
-            className={`inline-flex items-center gap-2 px-4 py-2.5 text-[13px] font-medium rounded-lg transition-all ${
-              showForm
-                ? "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                : "bg-teal-600 text-white hover:bg-teal-700 shadow-sm shadow-teal-600/20"
-            }`}
           >
-            {showForm ? <X className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
             {showForm ? "Cancel" : "New Patient"}
-          </button>
+          </Button>
         </div>
 
         {/* Create Form */}
         {showForm && (
-          <form onSubmit={handleCreate} className="bg-white rounded-xl border border-slate-200/80 p-6">
-            <h3 className="text-[14px] font-semibold text-slate-900 mb-4">Add New Patient</h3>
+          <form onSubmit={handleCreate} className="bg-white rounded-xl border border-slate-200/80 p-5">
+            <h3 className="text-[13px] font-semibold text-slate-900 mb-4">Add New Patient</h3>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <input name="first_name" required placeholder="First Name *" className="border border-slate-200 rounded-lg px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500" />
-              <input name="last_name" required placeholder="Last Name *" className="border border-slate-200 rounded-lg px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500" />
-              <input name="date_of_birth" type="date" required className="border border-slate-200 rounded-lg px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500" />
-              <input name="phone" placeholder="Phone" className="border border-slate-200 rounded-lg px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500" />
-              <input name="email" type="email" placeholder="Email" className="border border-slate-200 rounded-lg px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500" />
-              <input name="member_id" placeholder="Member ID" className="border border-slate-200 rounded-lg px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500" />
+              <Input name="first_name" label="First Name *" required placeholder="Jane" />
+              <Input name="last_name" label="Last Name *" required placeholder="Smith" />
+              <Input name="date_of_birth" label="Date of Birth *" type="date" required />
+              <Input name="phone" label="Phone" placeholder="(555) 123-4567" />
+              <Input name="email" label="Email" type="email" placeholder="jane@example.com" />
+              <Input name="member_id" label="Member ID" placeholder="MBR12345" />
             </div>
-            <button type="submit" className="mt-4 inline-flex items-center gap-2 px-5 py-2.5 bg-teal-600 text-white text-[13px] font-medium rounded-lg hover:bg-teal-700 transition-colors">
-              <Plus className="w-3.5 h-3.5" /> Create Patient
-            </button>
+            <div className="mt-4">
+              <Button type="submit" icon={<Plus className="w-3.5 h-3.5" />}>
+                Create Patient
+              </Button>
+            </div>
           </form>
         )}
 
         {/* Table */}
         <div className="bg-white rounded-xl border border-slate-200/80 overflow-hidden">
-          <table className="w-full text-[13px]">
-            <thead>
-              <tr className="bg-slate-50/50">
-                <th className="px-6 py-3 text-left font-medium text-slate-500 text-[11px] uppercase tracking-wider">Name</th>
-                <th className="px-6 py-3 text-left font-medium text-slate-500 text-[11px] uppercase tracking-wider">Date of Birth</th>
-                <th className="px-6 py-3 text-left font-medium text-slate-500 text-[11px] uppercase tracking-wider">Member ID</th>
-                <th className="px-6 py-3 text-left font-medium text-slate-500 text-[11px] uppercase tracking-wider">Phone</th>
-                <th className="px-6 py-3 text-left font-medium text-slate-500 text-[11px] uppercase tracking-wider">Email</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-50">
-              {loading ? (
-                <tr>
-                  <td colSpan={5} className="px-6 py-12 text-center">
-                    <div className="flex items-center justify-center gap-2 text-slate-400">
-                      <div className="w-4 h-4 border-2 border-teal-500 border-t-transparent rounded-full animate-spin" />
-                      <span className="text-sm">Loading patients...</span>
-                    </div>
-                  </td>
+          <div className="overflow-x-auto">
+            <table className="w-full text-[13px]">
+              <thead>
+                <tr className="bg-slate-50/50">
+                  <th className="px-5 py-3 text-left font-medium text-slate-500 text-[11px] uppercase tracking-wider">Name</th>
+                  <th className="px-5 py-3 text-left font-medium text-slate-500 text-[11px] uppercase tracking-wider">Date of Birth</th>
+                  <th className="px-5 py-3 text-left font-medium text-slate-500 text-[11px] uppercase tracking-wider">Member ID</th>
+                  <th className="px-5 py-3 text-left font-medium text-slate-500 text-[11px] uppercase tracking-wider">Phone</th>
+                  <th className="px-5 py-3 text-left font-medium text-slate-500 text-[11px] uppercase tracking-wider">Email</th>
                 </tr>
-              ) : patients.length === 0 ? (
-                <tr>
-                  <td colSpan={5} className="px-6 py-16 text-center">
-                    <div className="flex flex-col items-center">
-                      <div className="w-12 h-12 bg-slate-100 rounded-xl flex items-center justify-center mb-3">
-                        <Users className="w-6 h-6 text-slate-300" />
+              </thead>
+              <tbody className="divide-y divide-slate-50">
+                {loading ? (
+                  <SkeletonRows columns={5} rows={6} />
+                ) : patients.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="px-5 py-16 text-center">
+                      <div className="flex flex-col items-center">
+                        <div className="w-12 h-12 bg-slate-100 rounded-xl flex items-center justify-center mb-3">
+                          <Users className="w-6 h-6 text-slate-300" />
+                        </div>
+                        <p className="text-sm font-medium text-slate-500">No patients found</p>
+                        <p className="text-[12px] text-slate-400 mt-1">
+                          {debouncedSearch ? "Try a different search" : "Add a patient to get started"}
+                        </p>
                       </div>
-                      <p className="text-sm font-medium text-slate-500">No patients found</p>
-                      <p className="text-[12px] text-slate-400 mt-1">Add a patient to get started</p>
-                    </div>
-                  </td>
-                </tr>
-              ) : (
-                patients.map((p) => (
-                  <tr key={p.id} className="hover:bg-slate-50/50 transition-colors">
-                    <td className="px-6 py-3.5 font-medium text-slate-900">{p.first_name} {p.last_name}</td>
-                    <td className="px-6 py-3.5 text-slate-600">{p.date_of_birth}</td>
-                    <td className="px-6 py-3.5 font-mono text-[12px] text-slate-500">{p.member_id || "—"}</td>
-                    <td className="px-6 py-3.5 text-slate-600">{p.phone || "—"}</td>
-                    <td className="px-6 py-3.5 text-slate-600">{p.email || "—"}</td>
+                    </td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                ) : (
+                  patients.map((p) => (
+                    <tr key={p.id} className="hover:bg-slate-50/50 transition-colors">
+                      <td className="px-5 py-3 font-medium text-slate-900">
+                        {p.last_name}, {p.first_name}
+                      </td>
+                      <td className="px-5 py-3 text-slate-600">{p.date_of_birth}</td>
+                      <td className="px-5 py-3 font-mono text-[12px] text-slate-500">{p.member_id || "—"}</td>
+                      <td className="px-5 py-3 text-slate-600">{p.phone || "—"}</td>
+                      <td className="px-5 py-3 text-slate-600">{p.email || "—"}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
     </>
