@@ -332,21 +332,9 @@ class Orchestrator:
             )
             return None
 
-        # Update PA state
-        pa.status = transition.next_status.value
-        pa.current_agent = transition.agent_name
-        await self.db.commit()
-
-        logger.info(
-            "workflow.transition",
-            prior_auth_id=prior_auth_id,
-            from_status=current_status.value,
-            to_status=transition.next_status.value,
-            agent=transition.agent_name,
-            condition=condition,
-        )
-
-        # Run the agent if one is specified
+        # Run the agent (if any) BEFORE writing the new status, so a failed agent
+        # leaves the PA in its current, recoverable state instead of stranding it
+        # in the next status with no work done.
         if transition.agent_name:
             agent = self._agent_registry.get(transition.agent_name)
             if not agent:
@@ -361,25 +349,60 @@ class Orchestrator:
             )
             result = await agent.run(context)
 
-            # Auto-advance if agent completed successfully and provides a condition
-            if result.success and not result.requires_human:
-                if result.condition:
-                    await self.advance(prior_auth_id, condition=result.condition, _depth=_depth + 1)
-                elif result.next_agent:
-                    # Agent explicitly requested next step
-                    next_transitions = WORKFLOW_TRANSITIONS.get(PAStatus(pa.status), [])
-                    if next_transitions and len(next_transitions) == 1:
-                        await self.advance(prior_auth_id, _depth=_depth + 1)
+            if not result.success or result.requires_human:
+                # Hold the transition: the PA stays in current_status. Its
+                # execution record (written by BaseAgent.run) captures the failure.
+                logger.info(
+                    "workflow.transition_held",
+                    prior_auth_id=prior_auth_id,
+                    status=current_status.value,
+                    agent=transition.agent_name,
+                    requires_human=result.requires_human,
+                    error=result.error,
+                )
+                return result
+
+            await self._commit_transition(pa, transition, current_status, condition)
+
+            # Auto-advance now that the transition is committed.
+            if result.condition:
+                await self.advance(prior_auth_id, condition=result.condition, _depth=_depth + 1)
+            elif result.next_agent:
+                next_transitions = WORKFLOW_TRANSITIONS.get(PAStatus(pa.status), [])
+                if next_transitions and len(next_transitions) == 1:
+                    await self.advance(prior_auth_id, _depth=_depth + 1)
 
             return result
 
-        # No agent to run (terminal or pass-through state)
-        # Check if we should auto-advance further
+        # No agent to run (terminal or pass-through state): apply the transition,
+        # then auto-advance if the next state has a single unconditional exit.
+        await self._commit_transition(pa, transition, current_status, condition)
+
         next_transitions = WORKFLOW_TRANSITIONS.get(transition.next_status, [])
         if next_transitions and len(next_transitions) == 1 and next_transitions[0].condition is None:
             await self.advance(prior_auth_id, _depth=_depth + 1)
 
         return AgentResult(success=True, message=f"Transitioned to {transition.next_status.value}")
+
+    async def _commit_transition(
+        self,
+        pa: PriorAuth,
+        transition: Transition,
+        from_status: PAStatus,
+        condition: str | None,
+    ) -> None:
+        """Write the post-success state for a transition in one commit."""
+        pa.status = transition.next_status.value
+        pa.current_agent = transition.agent_name
+        await self.db.commit()
+        logger.info(
+            "workflow.transition",
+            prior_auth_id=pa.id,
+            from_status=from_status.value,
+            to_status=transition.next_status.value,
+            agent=transition.agent_name,
+            condition=condition,
+        )
 
     async def trigger_agent(self, prior_auth_id: str, agent_name: str, force: bool = False) -> AgentResult:
         """Manually trigger a specific agent on a PA case."""

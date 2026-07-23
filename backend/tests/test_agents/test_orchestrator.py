@@ -1,6 +1,13 @@
+import uuid
+from datetime import date
+
 import pytest
 from app.utils.constants import PAStatus
+from app.agents.base import AgentResult
 from app.agents.orchestrator import Orchestrator, WORKFLOW_TRANSITIONS, Transition
+from app.models.patient import Patient
+from app.models.prescription import Prescription
+from app.models.prior_auth import PriorAuth
 
 
 def test_workflow_transitions_complete():
@@ -51,3 +58,80 @@ def test_transition_agents_exist():
                 assert t.agent_name in valid_agents, (
                     f"Invalid agent '{t.agent_name}' in transition from {status}"
                 )
+
+
+class _StubAgent:
+    """Minimal stand-in for a workflow agent with a canned run() result."""
+
+    def __init__(self, agent_name, result):
+        self.agent_name = agent_name
+        self._result = result
+        self.ran = False
+
+    async def run(self, context):
+        self.ran = True
+        return self._result
+
+
+async def _seed_pa(db, status: PAStatus) -> PriorAuth:
+    patient = Patient(
+        id=str(uuid.uuid4()), first_name="T", last_name="X",
+        date_of_birth=date(1990, 1, 1),
+    )
+    rx = Prescription(
+        id=str(uuid.uuid4()), patient_id=patient.id,
+        prescriber_npi="1234567890", drug_name="Ozempic",
+    )
+    pa = PriorAuth(
+        id=str(uuid.uuid4()), patient_id=patient.id, prescription_id=rx.id,
+        status=status.value,
+    )
+    db.add_all([patient, rx, pa])
+    await db.commit()
+    return pa
+
+
+@pytest.mark.asyncio
+async def test_transition_held_when_agent_fails(db_session):
+    # INTAKE -> PA_DETECTION runs the pa_detection agent.
+    pa = await _seed_pa(db_session, PAStatus.INTAKE)
+    orch = Orchestrator(db_session)
+    orch._agent_registry["pa_detection"] = _StubAgent(
+        "pa_detection", AgentResult(success=False, error="boom")
+    )
+
+    result = await orch.advance(pa.id)
+
+    assert result.success is False
+    await db_session.refresh(pa)
+    # Status must NOT have advanced — the failed agent leaves it recoverable.
+    assert pa.status == PAStatus.INTAKE.value
+
+
+@pytest.mark.asyncio
+async def test_transition_held_when_requires_human(db_session):
+    pa = await _seed_pa(db_session, PAStatus.INTAKE)
+    orch = Orchestrator(db_session)
+    orch._agent_registry["pa_detection"] = _StubAgent(
+        "pa_detection", AgentResult(success=True, requires_human=True)
+    )
+
+    await orch.advance(pa.id)
+
+    await db_session.refresh(pa)
+    assert pa.status == PAStatus.INTAKE.value
+
+
+@pytest.mark.asyncio
+async def test_transition_commits_on_success(db_session):
+    pa = await _seed_pa(db_session, PAStatus.INTAKE)
+    orch = Orchestrator(db_session)
+    # Succeed with no condition so it doesn't cascade into further agents.
+    orch._agent_registry["pa_detection"] = _StubAgent(
+        "pa_detection", AgentResult(success=True)
+    )
+
+    await orch.advance(pa.id)
+
+    await db_session.refresh(pa)
+    assert pa.status == PAStatus.PA_DETECTION.value
