@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.database import get_db
 from app.schemas.common import HealthCheck
 
@@ -17,11 +18,24 @@ async def health_check(db: AsyncSession = Depends(get_db)):
     except Exception:
         db_status = "disconnected"
 
+    redis_status = "connected"
+    try:
+        import redis.asyncio as aioredis
+
+        client = aioredis.from_url(settings.redis_url)
+        try:
+            await client.ping()
+        finally:
+            await client.aclose()
+    except Exception:
+        redis_status = "disconnected"
+
+    healthy = db_status == "connected" and redis_status == "connected"
     return HealthCheck(
-        status="healthy" if db_status == "connected" else "degraded",
+        status="healthy" if healthy else "degraded",
         timestamp=datetime.now(timezone.utc),
         database=db_status,
-        redis="connected",
+        redis=redis_status,
     )
 
 
@@ -32,16 +46,3 @@ async def readiness_check(db: AsyncSession = Depends(get_db)):
         return {"ready": True}
     except Exception as e:
         return {"ready": False, "error": str(e)}
-
-
-@router.post("/seed-demo")
-async def seed_demo_data():
-    """One-time endpoint to seed demo data. Remove in production."""
-    import subprocess
-    result = subprocess.run(
-        ["python", "scripts/seed_demo.py"],
-        capture_output=True, text=True, cwd="/app"
-    )
-    if result.returncode == 0:
-        return {"status": "success", "output": result.stdout}
-    return {"status": "error", "output": result.stderr[-500:]}
