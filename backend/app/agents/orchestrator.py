@@ -1,6 +1,6 @@
 import structlog
 from dataclasses import dataclass
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -309,11 +309,14 @@ class Orchestrator:
                 success=True,
                 message="Workflow paused: max auto-advance depth reached",
             )
-        pa = await self.db.get(PriorAuth, prior_auth_id)
+        pa = await self._get_pa_for_update(prior_auth_id)
         if not pa:
             logger.error("workflow.pa_not_found", prior_auth_id=prior_auth_id)
             return None
 
+        # Snapshot the version we're transitioning from; _commit_transition only
+        # applies the state write if the row is still at this version.
+        expected_version = pa.lock_version
         current_status = PAStatus(pa.status)
         transitions = WORKFLOW_TRANSITIONS.get(current_status, [])
 
@@ -362,7 +365,14 @@ class Orchestrator:
                 )
                 return result
 
-            await self._commit_transition(pa, transition, current_status, condition)
+            committed = await self._commit_transition(
+                pa, transition, current_status, condition, expected_version
+            )
+            if not committed:
+                return AgentResult(
+                    success=False,
+                    message="Transition superseded by a concurrent update",
+                )
 
             # Auto-advance now that the transition is committed.
             if result.condition:
@@ -376,7 +386,14 @@ class Orchestrator:
 
         # No agent to run (terminal or pass-through state): apply the transition,
         # then auto-advance if the next state has a single unconditional exit.
-        await self._commit_transition(pa, transition, current_status, condition)
+        committed = await self._commit_transition(
+            pa, transition, current_status, condition, expected_version
+        )
+        if not committed:
+            return AgentResult(
+                success=False,
+                message="Transition superseded by a concurrent update",
+            )
 
         next_transitions = WORKFLOW_TRANSITIONS.get(transition.next_status, [])
         if next_transitions and len(next_transitions) == 1 and next_transitions[0].condition is None:
@@ -384,17 +401,59 @@ class Orchestrator:
 
         return AgentResult(success=True, message=f"Transitioned to {transition.next_status.value}")
 
+    async def _get_pa_for_update(self, prior_auth_id: str) -> PriorAuth | None:
+        """
+        Fetch a PA with a row lock (SELECT ... FOR UPDATE on Postgres; a no-op on
+        SQLite, where the optimistic version check is the sole guard).
+        """
+        stmt = select(PriorAuth).where(PriorAuth.id == prior_auth_id).with_for_update()
+        return (await self.db.execute(stmt)).scalar_one_or_none()
+
     async def _commit_transition(
         self,
         pa: PriorAuth,
         transition: Transition,
         from_status: PAStatus,
         condition: str | None,
-    ) -> None:
-        """Write the post-success state for a transition in one commit."""
+        expected_version: int,
+    ) -> bool:
+        """
+        Apply a transition's state write iff the row is still at expected_version.
+
+        Returns True if the transition committed, False if a concurrent worker
+        already advanced this PA (stale version → 0 rows updated). The agent's
+        own writes (committed inside run()) are preserved; only status,
+        current_agent, and lock_version are conditionally overwritten here.
+        """
+        pa_id = pa.id  # capture before any rollback expires the instance
+        stmt = (
+            update(PriorAuth)
+            .where(PriorAuth.id == pa_id, PriorAuth.lock_version == expected_version)
+            .values(
+                status=transition.next_status.value,
+                current_agent=transition.agent_name,
+                lock_version=expected_version + 1,
+            )
+        )
+        result = await self.db.execute(stmt)
+        if result.rowcount == 0:
+            await self.db.rollback()
+            logger.warning(
+                "workflow.transition_conflict",
+                prior_auth_id=pa_id,
+                from_status=from_status.value,
+                to_status=transition.next_status.value,
+                expected_version=expected_version,
+            )
+            return False
+
+        await self.db.commit()
+        # Sync the in-memory object to the values just written by the Core UPDATE
+        # (the ORM instance wasn't mutated, so it would otherwise be stale). Set
+        # directly rather than expire() to avoid a sync lazy-load in async code.
         pa.status = transition.next_status.value
         pa.current_agent = transition.agent_name
-        await self.db.commit()
+        pa.lock_version = expected_version + 1
         logger.info(
             "workflow.transition",
             prior_auth_id=pa.id,
@@ -403,10 +462,11 @@ class Orchestrator:
             agent=transition.agent_name,
             condition=condition,
         )
+        return True
 
     async def trigger_agent(self, prior_auth_id: str, agent_name: str, force: bool = False) -> AgentResult:
         """Manually trigger a specific agent on a PA case."""
-        pa = await self.db.get(PriorAuth, prior_auth_id)
+        pa = await self._get_pa_for_update(prior_auth_id)
         if not pa:
             return AgentResult(success=False, error="PA not found")
 

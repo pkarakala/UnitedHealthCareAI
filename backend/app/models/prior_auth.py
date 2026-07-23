@@ -61,6 +61,13 @@ class PriorAuth(Base, AuditMixin):
 
     # Workflow
     current_agent: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    # Optimistic-concurrency counter: incremented on every orchestrated status
+    # transition. A transition whose expected version no longer matches is
+    # rejected, preventing two concurrent workers (webhook / beat / manual) from
+    # both writing a status change to the same PA. See Orchestrator.advance.
+    lock_version: Mapped[int] = mapped_column(
+        Integer, default=0, server_default="0", nullable=False
+    )
     retry_count: Mapped[int] = mapped_column(Integer, default=0)
     max_retries: Mapped[int] = mapped_column(Integer, default=3)
     escalated: Mapped[bool] = mapped_column(Boolean, default=False)

@@ -135,3 +135,47 @@ async def test_transition_commits_on_success(db_session):
 
     await db_session.refresh(pa)
     assert pa.status == PAStatus.PA_DETECTION.value
+    assert pa.lock_version == 1  # bumped exactly once
+
+
+@pytest.mark.asyncio
+async def test_successful_transition_bumps_lock_version(db_session):
+    pa = await _seed_pa(db_session, PAStatus.INTAKE)
+    orch = Orchestrator(db_session)
+    from app.agents.orchestrator import Transition
+
+    committed = await orch._commit_transition(
+        pa,
+        Transition(next_status=PAStatus.PA_DETECTION, agent_name="pa_detection"),
+        PAStatus.INTAKE,
+        condition=None,
+        expected_version=0,
+    )
+    assert committed is True
+    assert pa.lock_version == 1
+
+
+@pytest.mark.asyncio
+async def test_stale_version_rejects_transition(db_session):
+    # Simulates a concurrent worker having already advanced the PA: the second
+    # commit sees expected_version=0 but the row is now at version 1, so it must
+    # not overwrite the state.
+    pa = await _seed_pa(db_session, PAStatus.PA_DETECTION)
+    pa.lock_version = 1
+    await db_session.commit()
+
+    orch = Orchestrator(db_session)
+    from app.agents.orchestrator import Transition
+
+    committed = await orch._commit_transition(
+        pa,
+        Transition(next_status=PAStatus.INSURANCE_VERIFICATION, agent_name="insurance_verification"),
+        PAStatus.PA_DETECTION,
+        condition="pa_required",
+        expected_version=0,  # stale
+    )
+
+    assert committed is False
+    await db_session.refresh(pa)
+    assert pa.status == PAStatus.PA_DETECTION.value  # unchanged
+    assert pa.lock_version == 1
