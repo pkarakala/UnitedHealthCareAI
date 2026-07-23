@@ -26,7 +26,7 @@ that exists. For a healthcare startup, the gap between claims and reality is the
 
 ## P0 — Trust & safety (do these before showing anyone)
 
-- [ ] 🔴 **Stop persisting LLM-invented facts as real state.**
+- [x] 🔴 **Stop persisting LLM-invented facts as real state.**
   - `agents/status_monitoring.py:64-90` — prompt says "Simulate a status check";
     Claude's guess is written to `pa.decision` as approved/denied.
   - `agents/patient_record.py:76-92` — "generate a realistic clinical profile";
@@ -37,20 +37,20 @@ that exists. For a healthcare startup, the gap between claims and reality is the
   - Fix: add a `simulation_mode` flag (config) — mark all simulated writes
     (`is_simulated` column or metadata), badge them in the UI, and hard-fail
     these agents in production mode until real integrations exist.
-- [ ] 🔴 **Wire up authentication.** `security.py` has complete JWT machinery with
+- [x] 🔴 **Wire up authentication.** `security.py` has complete JWT machinery with
   zero call sites; there is no login endpoint and no User model. Every endpoint
   (PHI reads, PA mutations, `/trigger/{agent}`) is public. Add User model +
   `/auth/login` + `Depends(get_current_user)` on all routers.
-- [ ] 🔴 **Frontend login is theatrical** (`login/page.tsx:9-12` just router.push,
+- [x] 🔴 **Frontend login is theatrical** (`login/page.tsx:9-12` just router.push,
   prefilled demo creds) and claims "Secured with end-to-end encryption" (line 67)
   — a false security claim. Wire it to real auth; remove the claim until true.
-- [ ] 🔴 **Webhooks are unauthenticated** (`api/v1/webhooks.py`) — anyone who can
+- [x] 🔴 **Webhooks are unauthenticated** (`api/v1/webhooks.py`) — anyone who can
   guess a pa_number can POST `{"status": "approved"}` and flip a PA to approved.
   Add signature verification (or shared secret) before any state transition.
-- [ ] 🔴 **`POST /health/seed-demo` runs a subprocess unauthenticated**
+- [x] 🔴 **`POST /health/seed-demo` runs a subprocess unauthenticated**
   (`api/v1/health.py:37-47`, comment says "Remove in production"). Remove it or
   gate behind auth + env check.
-- [ ] 🔴 **Make HIPAA_COMPLIANCE.md honest.** It claims field-level PHI encryption,
+- [x] 🔴 **Make HIPAA_COMPLIANCE.md honest.** It claims field-level PHI encryption,
   immutable audit logs, JWT auth with RBAC — none are wired
   (`encrypt_phi`/`decrypt_phi`: zero call sites; `AuditService`: zero call sites;
   auth: zero call sites). Rewrite as "Implemented / Partially implemented /
@@ -59,16 +59,17 @@ that exists. For a healthcare startup, the gap between claims and reality is the
   clinical summaries) or explicitly document the decision not to. Also fix the
   hardcoded KDF salt (`encryption.py:14`) and cache the Fernet instance.
 - [ ] 🟠 **Actually call `AuditService.log`** from PHI-touching endpoints.
-- [ ] 🟠 **Fail startup on default secrets in prod** — `config.py` ships
+- [x] 🟠 **Fail startup on default secrets in prod** — `config.py` ships
   `secret_key="change-me-in-production"`, default DB creds, `debug=True`.
   Add a prod-mode validator that refuses to boot with defaults.
 
 ## P1 — Correctness & production-readiness (backend)
 
-- [ ] 🟠 **Orchestrator recursion is unbounded** (`orchestrator.py:274-347`):
+- [x] 🟠 **Orchestrator recursion is unbounded** (`orchestrator.py:274-347`):
   `advance()` recurses on conditions; PENDING_REVIEW self-transitions on
   "pending" → potential infinite Claude-call loop (unbounded token spend).
   Convert to a loop with max-depth + cycle guard.
+  *(Done in Session A: max-depth guard of 8, hit in practice by a webhook test.)*
 - [ ] 🟠 **Workflow runs synchronously inside the HTTP request**
   (`prescriptions.py:64-69`): 4+ sequential Claude calls, no timeout, no
   idempotency. Dispatch to Celery (it's already in the stack, unused for this).
@@ -97,9 +98,10 @@ that exists. For a healthcare startup, the gap between claims and reality is the
   runs hourly, not every 2h.
 - [ ] 🟡 `PriorAuthUpdate` allows arbitrary status/decision writes via PUT,
   bypassing the state machine. Restrict mutable fields.
-- [ ] 🟡 Deployment bypasses Alembic (`start.sh` uses `create_all`, continues on
+- [x] 🟡 Deployment bypasses Alembic (`start.sh` uses `create_all`, continues on
   failure) — run `alembic upgrade head` in the container instead.
-- [ ] 🟡 `/health` hardcodes `redis="connected"`; actually ping Redis.
+  *(Done in Session A: start.sh stamps legacy create_all DBs at 001, then upgrades.)*
+- [x] 🟡 `/health` hardcodes `redis="connected"`; actually ping Redis.
 - [ ] 🟡 Missing FK indexes (communications/documents/appeals/agent_executions
   → prior_auth_id); add a migration.
 - [ ] 🟡 Analytics endpoints return hardcoded/fabricated numbers
@@ -241,3 +243,31 @@ IDs, KPI selection on dashboard, illustrated empty states, agent timeline concep
 ## Progress log
 
 - 2026-07-22 — Review completed; this plan created. Nothing checked off yet.
+- 2026-07-22 — **Session A (P0 safety) complete.** Commits f083723..b5926ad:
+  - Simulation flagging: `simulation_mode` setting; status_monitoring,
+    submission, patient_record, insurance_verification are marked
+    `simulates_external_calls` and refuse to run (requires_human) when it's
+    off. PAs they touch get `is_simulated` + `simulated_agents` (migration
+    002) with amber badges in the queue and detail UI.
+  - Auth end to end: User model + migration 003, `/auth/login` (audit-logged),
+    `/auth/me`, admin-only `/auth/users`, `scripts/create_user.py` bootstrap.
+    All routers behind `get_current_user` except health/auth/webhooks.
+    passlib replaced with direct bcrypt (passlib 1.7.4 breaks on bcrypt 5).
+    Frontend login posts real credentials, stores JWT (localStorage), shows
+    errors, logout works, 401 → redirect to /login. False "end-to-end
+    encryption" claim removed.
+  - Webhooks: HMAC-SHA256 signature required on all three endpoints
+    (`WEBHOOK_SECRET`), constant-time compare, 503 when unconfigured; unknown
+    statuses no longer advance the workflow.
+  - Orchestrator: max auto-advance depth 8 (was unbounded recursion —
+    PENDING_REVIEW/pending self-loop confirmed by test).
+  - seed-demo endpoint deleted; `/health` actually pings Redis.
+  - start.sh: `alembic upgrade head` (stamps legacy DBs at 001) instead of
+    `create_all`; alembic env strips DATABASE_URL whitespace.
+  - HIPAA_COMPLIANCE.md rewritten as honest status table + gap list.
+  - Tests 20 → 31 (auth + webhooks), all passing. Frontend `tsc` + `next build`
+    clean.
+  - **Deploy notes:** set `WEBHOOK_SECRET` on Railway; run
+    `python scripts/create_user.py <email> <password> --role admin` once;
+    remaining P0 stragglers → Session B: wire `encrypt_phi` (+salt fix),
+    `AuditService.log` on PHI endpoints.
