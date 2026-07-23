@@ -7,11 +7,41 @@ import anthropic
 import structlog
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
+from tenacity import (
+    retry,
+    retry_if_exception,
+    stop_after_attempt,
+    wait_exponential,
+)
 
 from app.config import settings
 from app.models.agent_execution import AgentExecution
 
 logger = structlog.get_logger()
+
+# Status codes worth retrying: 429 (rate limit) and 529 (overloaded). Anthropic
+# 0.42 has a dedicated RateLimitError for 429 but surfaces 529 as a generic
+# APIStatusError, so we key on the instance status_code rather than the class.
+_RETRY_STATUS_CODES = {429, 529}
+
+
+def _is_retryable_claude_error(exc: BaseException) -> bool:
+    if isinstance(exc, (anthropic.APIConnectionError, anthropic.APITimeoutError)):
+        return True
+    if isinstance(exc, anthropic.APIStatusError):
+        return getattr(exc, "status_code", None) in _RETRY_STATUS_CODES
+    return False
+
+
+def _log_claude_retry(retry_state) -> None:
+    """tenacity before_sleep callback — structlog-friendly (before_sleep_log wants stdlib)."""
+    exc = retry_state.outcome.exception() if retry_state.outcome else None
+    logger.warning(
+        "claude.retry",
+        attempt=retry_state.attempt_number,
+        error=str(exc) if exc else None,
+        status_code=getattr(exc, "status_code", None),
+    )
 
 
 class AgentContext(BaseModel):
@@ -167,6 +197,13 @@ class BaseAgent(ABC):
             agents.append(self.agent_name)
         pa.simulated_agents = agents
 
+    @retry(
+        retry=retry_if_exception(_is_retryable_claude_error),
+        wait=wait_exponential(multiplier=1, min=1, max=30),
+        stop=stop_after_attempt(4),
+        before_sleep=_log_claude_retry,
+        reraise=True,
+    )
     async def call_claude(
         self,
         messages: list[dict],
@@ -175,7 +212,9 @@ class BaseAgent(ABC):
         max_tokens: int | None = None,
     ) -> anthropic.types.Message:
         """
-        Standardized Claude API call with retry logic.
+        Standardized Claude API call. Retries on transient failures (429 rate
+        limit, 529 overloaded, connection/timeout) with exponential backoff up
+        to 4 attempts; other errors propagate immediately.
         Returns the raw Anthropic Message object.
         """
         kwargs = {
