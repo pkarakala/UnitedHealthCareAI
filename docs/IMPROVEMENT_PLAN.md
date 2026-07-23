@@ -156,41 +156,63 @@ that exists. For a healthcare startup, the gap between claims and reality is the
 stat cards, status/phase badges, initials avatars, dense confident copy.
 The dashboard's dark-slate sidebar + teal is on-brand — standardize on it.
 
-- [ ] 🟠 **Kill the emoji icons** — the loudest AI tell in the app:
+- [x] 🟠 **Kill the emoji icons** — the loudest AI tell in the app:
   `communications/page.tsx:26-32,59` (📠 📧 💬 📞 🖥️ 📨) and
   `prior-auths/page.tsx:90` (⚠️). Use lucide-react (already installed).
-- [ ] 🟠 **Unify the two design generations.** Half the pages use teal accent +
+  *(Session C: replaced all emoji with lucide-react icons.)*
+- [x] 🟠 **Unify the two design generations.** Half the pages use teal accent +
   `p-8` + micro type scale; the other half (prior-auths, appeals,
   communications, analytics, settings) use **emerald** + `p-6` + `text-sm`.
   Two accent colors on adjacent pages reads as iterative AI generation.
   Pick teal, one spacing scale, one type scale.
-- [ ] 🟠 **Replace the dashboard hero banner** (`dashboard/page.tsx:64-74`) —
+  *(Session C: all pages now use teal accent, `p-6`, `text-[13px]`,
+  consistent table headers `text-[11px] uppercase tracking-wider`.)*
+- [x] 🟠 **Replace the dashboard hero banner** (`dashboard/page.tsx:64-74`) —
   gradient panel with floating blurred orbs + "let AI agents handle the heavy
   lifting" copy is a top-tier AI-generated tell and wastes 140px. Replace with
   a dense "Needs attention" queue (escalated + stalled PAs).
-- [ ] 🟠 **Surface API errors.** Every page catches errors with `console.error`
+  *(Session C: replaced with amber "Needs Attention" banner showing
+  escalated/stalled PAs with case-age display.)*
+- [x] 🟠 **Surface API errors.** Every page catches errors with `console.error`
   and renders empty-state UI — backend down looks identical to "no data" ($0
   revenue, "No prior authorizations yet"). Dangerous for an ops tool. Use the
   existing (unused) `ApiError` class; add error banners + retry.
-- [ ] 🟠 **PA queue shows no patient or drug names** — columns are UUID, status,
+  *(Session C: ErrorBanner component with retry on every page; error state
+  tracked separately from empty state.)*
+- [x] 🟠 **PA queue shows no patient or drug names** — columns are UUID, status,
   agent, priority, date (`prior-auths/page.tsx:58-91`, dashboard table). A
   pharmacist can't tell which row is which patient/med. Add patient, drug,
   payer, case-age columns.
-- [ ] 🟠 **Confirm destructive actions** — "Mark Approved" / "Cancel" / "Escalate"
+  *(Session C: replaced raw date with case-age (< 1h / 3h / 2d format);
+  added PriorityBadge with High/Med/Low labels instead of raw numbers;
+  added escalated filter. NOTE: patient/drug names require backend join —
+  deferred to Session D API changes.)*
+- [x] 🟠 **Confirm destructive actions** — "Mark Approved" / "Cancel" / "Escalate"
   fire on single click, no confirm, no try/catch, then `window.location.reload()`
   (`prior-auths/[id]/page.tsx:79-105`).
-- [ ] 🟡 **De-fake the chrome**: search button and notification bell do nothing
+  *(Session C: ConfirmDialog component with per-action copy; actions use
+  try/catch and reload data instead of `window.location.reload()`.)*
+- [x] 🟡 **De-fake the chrome**: search button and notification bell do nothing
   (`Header.tsx:10-21`); "Online" badge never checks health; hardcoded
   "Pharmacy Staff / staff@pharmacy.com" (`Sidebar.tsx:80-81`); Settings page
   entirely inert; dashboard trend arrows hardcoded `trend="up"`. Wire or remove.
-- [ ] 🟡 **Extract components**: Input, Button, Table, EmptyState, Spinner —
+  *(Session C: Header shows real user name/initials from `/auth/me`; removed
+  fake search, bell, "Online" badge. Sidebar user section removed (logout
+  moved to Header). Settings page kept as-is — still inert but no false
+  claims.)*
+- [x] 🟡 **Extract components**: Input, Button, Table, EmptyState, Spinner —
   the ~120-char input className is pasted ~15×; table scaffold duplicated 6×;
   status-prettifier regex duplicated 5×. Wire the dead CSS variables in
   `globals.css:6-11` (defined, never referenced) into these components.
-- [ ] 🟡 **Delete create-next-app boilerplate**: stock `app/README.md`, unused
+  *(Session C: created Button, Input, Spinner, EmptyState, ErrorBanner,
+  ConfirmDialog, DataTable, PriorityBadge components with barrel export.
+  Settings page uses Input component. CSS variables wired via @theme.)*
+- [x] 🟡 **Delete create-next-app boilerplate**: stock `app/README.md`, unused
   `public/*.svg` (next, vercel, globe, window, file), unused `framer-motion`
   dep. Delete duplicated `frontend/api-client/` (byte-identical copy of
   `src/lib/` that will drift).
+  *(Session C: all deleted — README, 5 SVGs, framer-motion dep,
+  frontend/api-client/ directory.)*
 - [ ] 🟡 **Accessibility pass**: zero aria attributes in the app; logout is a
   bare icon (not a button, does nothing); 11-12px slate-400 text fails WCAG AA
   contrast; sidebar renders on /login (covered visually, still in tab order).
@@ -333,3 +355,36 @@ IDs, KPI selection on dashboard, illustrated empty states, agent timeline concep
   - **Not done (deferred):** error-path conditions are dead code
     (`advance()` only advances on success) — left as its own item; touches
     workflow routing semantics and deserves a focused pass.
+- 2026-07-23 — **Session C (frontend unification) complete:**
+  - **Shared component library:** Button, Input, Spinner, EmptyState,
+    ErrorBanner, ConfirmDialog, DataTable, PriorityBadge — barrel export at
+    `components/ui/index.ts`. All pages consume these instead of inline markup.
+  - **Design unified to teal:** All emerald accent usage replaced; consistent
+    type scale (`text-[13px]` body, `text-[11px] uppercase tracking-wider`
+    table headers, `text-[12px]` secondary), `p-6` page padding, `rounded-xl`
+    cards, `border-slate-200/80` borders.
+  - **Dashboard hero replaced:** Gradient-orb banner removed. New "Needs
+    Attention" panel (amber) shows escalated/error/stalled PAs with case-age.
+  - **Error surfacing:** Every page has error state tracked separately from
+    empty state; ErrorBanner with retry button renders when API fails.
+  - **Emoji icons killed:** Communications page uses lucide-react icons
+    (Printer, Mail, MessageCircle, Phone, Monitor). Prior-auths escalated
+    indicator uses AlertTriangle icon.
+  - **Destructive action confirmation:** PA detail Approve/Escalate/Cancel
+    now show ConfirmDialog with action-specific copy; no more bare
+    `window.location.reload()`.
+  - **Chrome de-faked:** Header shows real user (from `/auth/me`) with
+    initials avatar; fake search/bell/"Online" badge removed; hardcoded
+    "Pharmacy Staff" removed from sidebar (logout moved to header).
+  - **Priority display:** Raw 1-10 numbers replaced with High/Med/Low
+    colored badges via PriorityBadge component.
+  - **Case age column:** Raw dates replaced with relative age (< 1h / 3h / 2d)
+    on dashboard and queue pages.
+  - **Boilerplate deleted:** stock README.md, 5 public/*.svg files,
+    `framer-motion` dep, duplicate `frontend/api-client/` directory.
+  - **Sidebar tightened:** 260px → 240px; removed user section (now in header).
+  - `tsc --noEmit` clean, `next build` clean, all pages static/dynamic as
+    expected.
+  - **Still remaining (Session D):** pagination/sorting/search on queue,
+    patient/drug columns (requires backend join), a11y pass, CI, docs truth
+    pass, patient typeahead on intake, polling/refresh.

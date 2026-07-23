@@ -2,8 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Header from "@/components/layout/Header";
-import StatCard from "@/components/ui/StatCard";
-import StatusBadge from "@/components/ui/StatusBadge";
+import { StatCard, StatusBadge, Spinner, ErrorBanner, PriorityBadge } from "@/components/ui";
 import { api } from "@/lib/api";
 import type { DashboardMetrics, PriorAuth } from "@/lib/types";
 import {
@@ -23,55 +22,79 @@ export default function DashboardPage() {
   const [metrics, setMetrics] = useState<DashboardMetrics | null>(null);
   const [recentPAs, setRecentPAs] = useState<PriorAuth[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    async function load() {
-      try {
-        const [m, pas] = await Promise.all([
-          api.analytics.dashboard(),
-          api.priorAuths.list({ limit: 8 }),
-        ]);
-        setMetrics(m);
-        setRecentPAs(pas);
-      } catch (e) {
-        console.error("Failed to load dashboard:", e);
-      } finally {
-        setLoading(false);
-      }
+  async function load() {
+    setError(null);
+    setLoading(true);
+    try {
+      const [m, pas] = await Promise.all([
+        api.analytics.dashboard(),
+        api.priorAuths.list({ limit: 10 }),
+      ]);
+      setMetrics(m);
+      setRecentPAs(pas);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load dashboard");
+    } finally {
+      setLoading(false);
     }
-    load();
-  }, []);
+  }
+
+  useEffect(() => { load(); }, []);
 
   if (loading) {
     return (
       <>
         <Header title="Dashboard" />
-        <div className="p-8 flex items-center justify-center h-64">
-          <div className="flex items-center gap-3 text-slate-400">
-            <div className="w-5 h-5 border-2 border-teal-500 border-t-transparent rounded-full animate-spin" />
-            <span className="text-sm">Loading dashboard...</span>
-          </div>
-        </div>
+        <Spinner label="Loading dashboard..." />
       </>
     );
   }
 
+  const needsAttention = recentPAs.filter(
+    (pa) => pa.escalated || pa.status === "error" || pa.status === "awaiting_records" || pa.status === "doctor_outreach"
+  );
+
   return (
     <>
       <Header title="Dashboard" />
-      <div className="p-8 space-y-8 max-w-[1400px]">
-        {/* Welcome Section */}
-        <div className="bg-gradient-to-r from-slate-900 to-slate-800 rounded-2xl p-8 text-white relative overflow-hidden">
-          <div className="absolute top-0 right-0 w-64 h-64 bg-teal-500/10 rounded-full -translate-y-1/2 translate-x-1/2" />
-          <div className="absolute bottom-0 left-1/2 w-32 h-32 bg-teal-500/5 rounded-full translate-y-1/2" />
-          <div className="relative">
-            <p className="text-teal-400 text-[12px] font-medium uppercase tracking-wider">Overview</p>
-            <h2 className="text-xl font-semibold mt-1">Prior Authorization Command Center</h2>
-            <p className="text-slate-400 text-sm mt-2 max-w-lg">
-              Monitor your PA workflow performance, track approvals in real-time, and let AI agents handle the heavy lifting.
-            </p>
+      <div className="p-6 space-y-6 max-w-[1400px]">
+        {error && <ErrorBanner message={error} onRetry={load} />}
+
+        {/* Needs Attention */}
+        {needsAttention.length > 0 && (
+          <div className="bg-amber-50/50 border border-amber-200/60 rounded-xl p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <AlertCircle className="w-4 h-4 text-amber-600" />
+              <h3 className="text-[13px] font-semibold text-amber-900">
+                Needs Attention ({needsAttention.length})
+              </h3>
+            </div>
+            <div className="space-y-1.5">
+              {needsAttention.slice(0, 5).map((pa) => (
+                <Link
+                  key={pa.id}
+                  href={`/prior-auths/${pa.id}`}
+                  className="flex items-center justify-between px-3 py-2 rounded-lg hover:bg-amber-100/50 transition-colors"
+                >
+                  <div className="flex items-center gap-3">
+                    <span className="font-mono text-[12px] text-amber-800">{pa.pa_number || pa.id.slice(0, 8)}</span>
+                    <StatusBadge status={pa.status} />
+                    {pa.escalated && (
+                      <span className="text-[10px] uppercase tracking-wide bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-medium">
+                        Escalated
+                      </span>
+                    )}
+                  </div>
+                  <span className="text-[11px] text-amber-600">
+                    {formatAge(pa.created_at)}
+                  </span>
+                </Link>
+              ))}
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Primary Stats */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -92,7 +115,7 @@ export default function DashboardPage() {
             value={`${(metrics?.approval_rate ?? 0).toFixed(1)}%`}
             subtitle="Overall performance"
             trend="up"
-            icon={<TrendingUp className="w-5 h-5 text-emerald-500" />}
+            icon={<TrendingUp className="w-5 h-5 text-teal-500" />}
           />
           <StatCard
             title="Revenue Recovered"
@@ -115,7 +138,7 @@ export default function DashboardPage() {
             title="Appeal Success"
             value={`${(metrics?.appeal_success_rate ?? 0).toFixed(0)}%`}
             subtitle="Appeals won"
-            icon={<CheckCircle2 className="w-5 h-5 text-emerald-400" />}
+            icon={<CheckCircle2 className="w-5 h-5 text-teal-400" />}
           />
           <StatCard
             title="Approved Today"
@@ -127,7 +150,7 @@ export default function DashboardPage() {
 
         {/* Recent PAs Table */}
         <div className="bg-white rounded-xl border border-slate-200/80 overflow-hidden">
-          <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+          <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
             <div>
               <h3 className="text-[14px] font-semibold text-slate-900">Recent Prior Authorizations</h3>
               <p className="text-[12px] text-slate-400 mt-0.5">Latest PA cases across all statuses</p>
@@ -143,17 +166,17 @@ export default function DashboardPage() {
             <table className="w-full text-[13px]">
               <thead>
                 <tr className="bg-slate-50/50">
-                  <th className="px-6 py-3 text-left font-medium text-slate-500 text-[11px] uppercase tracking-wider">PA ID</th>
-                  <th className="px-6 py-3 text-left font-medium text-slate-500 text-[11px] uppercase tracking-wider">Status</th>
-                  <th className="px-6 py-3 text-left font-medium text-slate-500 text-[11px] uppercase tracking-wider">Agent</th>
-                  <th className="px-6 py-3 text-left font-medium text-slate-500 text-[11px] uppercase tracking-wider">Priority</th>
-                  <th className="px-6 py-3 text-left font-medium text-slate-500 text-[11px] uppercase tracking-wider">Created</th>
+                  <th className="px-5 py-3 text-left font-medium text-slate-500 text-[11px] uppercase tracking-wider">Case</th>
+                  <th className="px-5 py-3 text-left font-medium text-slate-500 text-[11px] uppercase tracking-wider">Status</th>
+                  <th className="px-5 py-3 text-left font-medium text-slate-500 text-[11px] uppercase tracking-wider">Agent</th>
+                  <th className="px-5 py-3 text-left font-medium text-slate-500 text-[11px] uppercase tracking-wider">Priority</th>
+                  <th className="px-5 py-3 text-left font-medium text-slate-500 text-[11px] uppercase tracking-wider">Age</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
                 {recentPAs.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="px-6 py-16 text-center">
+                    <td colSpan={5} className="px-5 py-16 text-center">
                       <div className="flex flex-col items-center">
                         <div className="w-12 h-12 bg-slate-100 rounded-xl flex items-center justify-center mb-3">
                           <FileText className="w-6 h-6 text-slate-300" />
@@ -173,28 +196,22 @@ export default function DashboardPage() {
                 ) : (
                   recentPAs.map((pa) => (
                     <tr key={pa.id} className="hover:bg-slate-50/50 transition-colors">
-                      <td className="px-6 py-3.5">
+                      <td className="px-5 py-3">
                         <Link href={`/prior-auths/${pa.id}`} className="font-mono text-[12px] text-teal-600 hover:underline">
-                          {pa.id.slice(0, 8)}
+                          {pa.pa_number || pa.id.slice(0, 8)}
                         </Link>
                       </td>
-                      <td className="px-6 py-3.5">
+                      <td className="px-5 py-3">
                         <StatusBadge status={pa.status} />
                       </td>
-                      <td className="px-6 py-3.5 text-slate-600">
+                      <td className="px-5 py-3 text-slate-600">
                         {pa.current_agent?.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()) || "—"}
                       </td>
-                      <td className="px-6 py-3.5">
-                        <span className={`inline-flex items-center justify-center w-6 h-6 rounded-md text-[11px] font-semibold ${
-                          pa.priority <= 3 ? "bg-red-50 text-red-600" :
-                          pa.priority <= 5 ? "bg-amber-50 text-amber-600" :
-                          "bg-slate-50 text-slate-500"
-                        }`}>
-                          {pa.priority}
-                        </span>
+                      <td className="px-5 py-3">
+                        <PriorityBadge priority={pa.priority} />
                       </td>
-                      <td className="px-6 py-3.5 text-slate-400 text-[12px]">
-                        {new Date(pa.created_at).toLocaleDateString()}
+                      <td className="px-5 py-3 text-slate-400 text-[12px]">
+                        {formatAge(pa.created_at)}
                       </td>
                     </tr>
                   ))
@@ -206,4 +223,13 @@ export default function DashboardPage() {
       </div>
     </>
   );
+}
+
+function formatAge(dateStr: string): string {
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const hours = Math.floor(diff / 3_600_000);
+  if (hours < 1) return "< 1h";
+  if (hours < 24) return `${hours}h`;
+  const days = Math.floor(hours / 24);
+  return `${days}d`;
 }
