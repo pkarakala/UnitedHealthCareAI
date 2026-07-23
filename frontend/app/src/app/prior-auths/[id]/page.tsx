@@ -67,6 +67,14 @@ export default function PriorAuthDetailPage() {
                 {pa.escalated && (
                   <span className="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded-full">Escalated</span>
                 )}
+                {pa.is_simulated && (
+                  <span
+                    className="text-xs bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full"
+                    title={`Contains simulated data from: ${(pa.simulated_agents || []).join(", ")}`}
+                  >
+                    Simulated data
+                  </span>
+                )}
               </div>
               <p className="mt-2 text-sm text-slate-600">
                 PA Number: <span className="font-mono">{pa.pa_number || "Not assigned"}</span>

@@ -44,6 +44,8 @@ class PriorAuthRead(BaseModel):
     claim_amount: float | None = None
     revenue_recovered: float | None = None
     current_agent: str | None = None
+    is_simulated: bool = False
+    simulated_agents: list | None = None
     retry_count: int
     escalated: bool
     assigned_to: str | None = None

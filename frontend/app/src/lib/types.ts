@@ -171,6 +171,8 @@ export interface PriorAuth {
   claim_amount: number | null;
   revenue_recovered: number | null;
   current_agent: string | null;
+  is_simulated: boolean;
+  simulated_agents: string[] | null;
   retry_count: number;
   escalated: boolean;
   assigned_to: string | null;

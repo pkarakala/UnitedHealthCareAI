@@ -83,7 +83,16 @@ export default function PriorAuthsPage() {
                           {pa.id.slice(0, 8)}
                         </Link>
                       </td>
-                      <td className="px-5 py-3"><StatusBadge status={pa.status} /></td>
+                      <td className="px-5 py-3">
+                        <div className="flex items-center gap-1.5">
+                          <StatusBadge status={pa.status} />
+                          {pa.is_simulated && (
+                            <span className="text-[10px] uppercase tracking-wide bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded" title="Contains simulated data">
+                              Sim
+                            </span>
+                          )}
+                        </div>
+                      </td>
                       <td className="px-5 py-3 text-slate-600">{pa.pa_number || "—"}</td>
                       <td className="px-5 py-3 text-slate-600">{pa.current_agent?.replace(/_/g, " ") || "—"}</td>
                       <td className="px-5 py-3 text-slate-600">{pa.decision || "—"}</td>

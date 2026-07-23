@@ -1,21 +1,36 @@
 #!/bin/bash
-# Create tables directly using Python (with URL strip fix)
-python -c "
+set -e
+
+# Databases created before Alembic was wired in (via create_all) have tables
+# but no alembic_version row. Stamp those at the baseline revision so
+# `upgrade head` only applies migrations added since.
+if python - <<'PY'
 import asyncio
 import os
+import sys
+
+from sqlalchemy import inspect
 from sqlalchemy.ext.asyncio import create_async_engine
-from app.models import Base
 
-async def create_tables():
-    url = os.environ.get('DATABASE_URL', '').strip()
+
+async def needs_stamp() -> bool:
+    url = os.environ.get("DATABASE_URL", "").strip()
     engine = create_async_engine(url, echo=False)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    await engine.dispose()
-    print('Database tables created successfully')
+    try:
+        async with engine.connect() as conn:
+            tables = await conn.run_sync(lambda c: inspect(c).get_table_names())
+    finally:
+        await engine.dispose()
+    return "prior_auths" in tables and "alembic_version" not in tables
 
-asyncio.run(create_tables())
-" || echo "Table creation skipped"
 
-# Start the application
+sys.exit(0 if asyncio.run(needs_stamp()) else 1)
+PY
+then
+    echo "Existing schema without alembic_version detected; stamping baseline 001"
+    alembic stamp 001
+fi
+
+alembic upgrade head
+
 uvicorn app.main:app --host 0.0.0.0 --port 8000

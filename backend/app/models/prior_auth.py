@@ -53,6 +53,11 @@ class PriorAuth(Base, AuditMixin):
     claim_amount: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
     revenue_recovered: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
 
+    # Simulation tracking — True when any agent wrote simulated (LLM-invented)
+    # external data to this PA. simulated_agents lists which agents did so.
+    is_simulated: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
+    simulated_agents: Mapped[list | None] = mapped_column(JSON, nullable=True)
+
     # Workflow
     current_agent: Mapped[str | None] = mapped_column(String(50), nullable=True)
     retry_count: Mapped[int] = mapped_column(Integer, default=0)

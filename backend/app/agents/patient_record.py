@@ -19,6 +19,7 @@ class PatientRecordAgent(BaseAgent):
     """
 
     agent_name = "patient_record"
+    simulates_external_calls = True  # No real EHR/HIE integration — profile is LLM-generated
 
     def get_system_prompt(self) -> str:
         return """You are a patient medical records retrieval specialist. Your job is to
@@ -90,8 +91,9 @@ based on the drug being prescribed and typical patient scenarios."""
 
             # Update PA with collected data
             if pa:
-                pa.collected_documents = pa.collected_documents or {}
+                pa.collected_documents = dict(pa.collected_documents or {})
                 pa.collected_documents["patient_record"] = result_data
+                await self.mark_simulated(context.prior_auth_id)
                 await self.db.commit()
 
             data_gaps = result_data.get("data_gaps", [])

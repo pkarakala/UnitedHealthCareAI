@@ -16,6 +16,7 @@ class SubmissionAgent(BaseAgent):
     """
 
     agent_name = "submission"
+    simulates_external_calls = True  # No real ePA/CoverMyMeds/fax — confirmation is LLM-invented
 
     def get_system_prompt(self) -> str:
         return """You are a prior authorization submission specialist. You handle the final
@@ -85,6 +86,7 @@ Generate a realistic confirmation number and expected timeline."""
             hours = result_data.get("expected_response_hours", 72)
             pa.expected_response_date = datetime.now(timezone.utc) + timedelta(hours=hours)
 
+            await self.mark_simulated(context.prior_auth_id)
             await self.db.commit()
 
             return AgentResult(

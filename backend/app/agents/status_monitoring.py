@@ -13,6 +13,7 @@ class StatusMonitoringAgent(BaseAgent):
     """
 
     agent_name = "status_monitoring"
+    simulates_external_calls = True  # No real payer/portal API — status is LLM-guessed
 
     def get_system_prompt(self) -> str:
         return """You are a prior authorization status monitoring specialist. You check
@@ -91,6 +92,7 @@ Note: In production this would make actual API calls to check real status."""
                 pa.decision_at = datetime.now(timezone.utc)
                 pa.denial_reason = result_data.get("denial_details", {}).get("reason", "")
 
+            await self.mark_simulated(context.prior_auth_id)
             await self.db.commit()
 
             return AgentResult(

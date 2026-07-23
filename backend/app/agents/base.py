@@ -34,6 +34,10 @@ class AgentResult(BaseModel):
     message: str | None = None
 
 
+class SimulationDisabledError(RuntimeError):
+    """Raised when a simulating agent runs with simulation_mode=False."""
+
+
 class BaseAgent(ABC):
     """
     Abstract base class for all 16 PA workflow agents.
@@ -41,12 +45,18 @@ class BaseAgent(ABC):
     Each agent implements execute() with its specific logic and get_system_prompt()
     for its Claude instructions. The base run() method handles lifecycle management:
     DB logging, tracing, timing, error handling.
+
+    Agents that fabricate external-world results (payer responses, EHR data,
+    submission confirmations) must set simulates_external_calls = True. They are
+    blocked from running when settings.simulation_mode is False, and any PA they
+    touch is flagged is_simulated.
     """
 
     agent_name: str = "base"
     model: str = settings.default_model
     max_tokens: int = settings.max_tokens
     temperature: float = 0.1
+    simulates_external_calls: bool = False
 
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -71,6 +81,22 @@ class BaseAgent(ABC):
         Lifecycle wrapper called by the orchestrator.
         Handles: execution logging, timing, error recovery.
         """
+        if self.simulates_external_calls and not settings.simulation_mode:
+            logger.error(
+                "agent.blocked_simulation_disabled",
+                agent=self.agent_name,
+                prior_auth_id=context.prior_auth_id,
+            )
+            return AgentResult(
+                success=False,
+                requires_human=True,
+                error=(
+                    f"Agent '{self.agent_name}' simulates external integrations and is "
+                    "disabled in production (simulation_mode=False). A real integration "
+                    "or manual handling is required."
+                ),
+            )
+
         execution_id = str(uuid.uuid4())
         start_time = time.time()
 
@@ -127,6 +153,19 @@ class BaseAgent(ABC):
 
         await self.db.commit()
         return result
+
+    async def mark_simulated(self, prior_auth_id: str) -> None:
+        """Flag a PA as containing simulated data written by this agent."""
+        from app.models.prior_auth import PriorAuth
+
+        pa = await self.db.get(PriorAuth, prior_auth_id)
+        if not pa:
+            return
+        pa.is_simulated = True
+        agents = list(pa.simulated_agents or [])
+        if self.agent_name not in agents:
+            agents.append(self.agent_name)
+        pa.simulated_agents = agents
 
     async def call_claude(
         self,

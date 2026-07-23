@@ -13,6 +13,7 @@ class InsuranceVerificationAgent(BaseAgent):
     """
 
     agent_name = "insurance_verification"
+    simulates_external_calls = True  # No real eligibility API — coverage/copay is LLM-guessed
 
     def get_system_prompt(self) -> str:
         return """You are a pharmacy insurance verification specialist. Your job is to verify
@@ -100,10 +101,12 @@ affect the prior authorization process."""
 
             # Update insurance record with verification findings
             if insurance and result_data.get("step_therapy_required"):
-                insurance.step_therapy_rules = insurance.step_therapy_rules or {}
+                insurance.step_therapy_rules = dict(insurance.step_therapy_rules or {})
                 insurance.step_therapy_rules["verified"] = True
                 insurance.step_therapy_rules["drugs"] = result_data.get("step_therapy_drugs", [])
-                await self.db.commit()
+
+            await self.mark_simulated(context.prior_auth_id)
+            await self.db.commit()
 
             return AgentResult(
                 success=True,

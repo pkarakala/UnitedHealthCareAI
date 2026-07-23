@@ -9,7 +9,9 @@ from app.config import settings
 from app.models import Base
 
 config = context.config
-config.set_main_option("sqlalchemy.url", settings.database_url)
+# Strip to tolerate trailing whitespace/newlines in platform-provided URLs
+# (see start.sh history: Railway appends a newline to DATABASE_URL).
+config.set_main_option("sqlalchemy.url", settings.database_url.strip())
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
