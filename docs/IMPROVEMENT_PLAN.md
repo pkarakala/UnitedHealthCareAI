@@ -1,0 +1,243 @@
+# Improvement Plan — Startup-Grade Review (2026-07-22)
+
+Comprehensive review of the full repo (backend, frontend, docs, infra) with two goals:
+make it **professional / startup-grade** and make it **not look AI-generated**.
+This doc is the tracked source of truth for that work. Check items off as they land.
+
+Review method: full read of backend (~90 py files), frontend (23 ts/tsx files),
+all docs, deploy configs, plus the live marketing site (usahealthcare.ai) as brand
+reference. Severity: 🔴 critical · 🟠 high · 🟡 medium · ⚪ polish.
+
+---
+
+## The honest one-paragraph assessment
+
+The workflow engine, state machine, DB schema, typed API client, and StatusBadge
+system are a genuinely good skeleton. But **every external touchpoint is simulated**
+(auth, payer APIs, EHR, ePA submission, SMS/fax, file storage), and — the single
+worst issue — several agents have Claude *invent* clinical facts and approval
+decisions which are then **written to the database as real state**. Auth, PHI
+encryption, and audit logging all exist as code but have **zero call sites**. The
+docs (esp. HIPAA_COMPLIANCE.md) describe the codebase you intended, not the one
+that exists. For a healthcare startup, the gap between claims and reality is the
+#1 thing a technical advisor, pilot pharmacy, or investor would flag.
+
+---
+
+## P0 — Trust & safety (do these before showing anyone)
+
+- [ ] 🔴 **Stop persisting LLM-invented facts as real state.**
+  - `agents/status_monitoring.py:64-90` — prompt says "Simulate a status check";
+    Claude's guess is written to `pa.decision` as approved/denied.
+  - `agents/patient_record.py:76-92` — "generate a realistic clinical profile";
+    fabricated labs feed the medical-necessity letter.
+  - `agents/submission.py:70-85` — "Generate a realistic confirmation number";
+    sets `submitted_at` on a submission that never happened.
+  - `agents/insurance_verification.py` — Claude invents copays/coverage.
+  - Fix: add a `simulation_mode` flag (config) — mark all simulated writes
+    (`is_simulated` column or metadata), badge them in the UI, and hard-fail
+    these agents in production mode until real integrations exist.
+- [ ] 🔴 **Wire up authentication.** `security.py` has complete JWT machinery with
+  zero call sites; there is no login endpoint and no User model. Every endpoint
+  (PHI reads, PA mutations, `/trigger/{agent}`) is public. Add User model +
+  `/auth/login` + `Depends(get_current_user)` on all routers.
+- [ ] 🔴 **Frontend login is theatrical** (`login/page.tsx:9-12` just router.push,
+  prefilled demo creds) and claims "Secured with end-to-end encryption" (line 67)
+  — a false security claim. Wire it to real auth; remove the claim until true.
+- [ ] 🔴 **Webhooks are unauthenticated** (`api/v1/webhooks.py`) — anyone who can
+  guess a pa_number can POST `{"status": "approved"}` and flip a PA to approved.
+  Add signature verification (or shared secret) before any state transition.
+- [ ] 🔴 **`POST /health/seed-demo` runs a subprocess unauthenticated**
+  (`api/v1/health.py:37-47`, comment says "Remove in production"). Remove it or
+  gate behind auth + env check.
+- [ ] 🔴 **Make HIPAA_COMPLIANCE.md honest.** It claims field-level PHI encryption,
+  immutable audit logs, JWT auth with RBAC — none are wired
+  (`encrypt_phi`/`decrypt_phi`: zero call sites; `AuditService`: zero call sites;
+  auth: zero call sites). Rewrite as "Implemented / Partially implemented /
+  Planned" table. Healthcare startups get burned by overclaiming.
+- [ ] 🟠 **Actually use `encrypt_phi` on PHI columns** (patient name/DOB/phone/email,
+  clinical summaries) or explicitly document the decision not to. Also fix the
+  hardcoded KDF salt (`encryption.py:14`) and cache the Fernet instance.
+- [ ] 🟠 **Actually call `AuditService.log`** from PHI-touching endpoints.
+- [ ] 🟠 **Fail startup on default secrets in prod** — `config.py` ships
+  `secret_key="change-me-in-production"`, default DB creds, `debug=True`.
+  Add a prod-mode validator that refuses to boot with defaults.
+
+## P1 — Correctness & production-readiness (backend)
+
+- [ ] 🟠 **Orchestrator recursion is unbounded** (`orchestrator.py:274-347`):
+  `advance()` recurses on conditions; PENDING_REVIEW self-transitions on
+  "pending" → potential infinite Claude-call loop (unbounded token spend).
+  Convert to a loop with max-depth + cycle guard.
+- [ ] 🟠 **Workflow runs synchronously inside the HTTP request**
+  (`prescriptions.py:64-69`): 4+ sequential Claude calls, no timeout, no
+  idempotency. Dispatch to Celery (it's already in the stack, unused for this).
+- [ ] 🟠 **Retry logic is a docstring** (`base.py:139` claims it; none exists;
+  tenacity is in requirements, imported nowhere). Add tenacity retry on 429/529
+  to `call_claude`.
+- [ ] 🟠 **Status mutated before agent runs, commits scattered mid-workflow**
+  (`orchestrator.py:302-305`, `base.py:128`, per-agent commits) — a failed agent
+  strands the PA in the new status. Move status write after success; single
+  transaction boundary per transition.
+- [ ] 🟠 **File uploads silently discard bytes** (`prescriptions.py:38-41`,
+  `documents.py:20-40`) — DB row created, file never written. Write to disk/S3
+  or return 501 honestly.
+- [ ] 🟠 **Concurrent transitions unguarded** — webhook + Celery beat + manual
+  advance can race on the same PA. Add row locking (`SELECT ... FOR UPDATE`)
+  or optimistic versioning.
+- [ ] 🟡 **Celery async misuse**: shared module-level asyncpg engine across
+  `asyncio.run()` loops will hit "attached to a different loop" errors.
+  Create engine per task or use a sync engine in workers.
+- [ ] 🟡 `call_claude_json` fence-stripping is fragile (`base.py:189-195`) — no
+  schema validation of Claude output before DB writes; `float(revenue)` can
+  raise (`approval.py:88`). Validate with Pydantic; retry on parse failure.
+- [ ] 🟡 Error-path conditions are dead code — agents return `success=False` with
+  a condition, but `advance()` only advances on success → silent stalls.
+- [ ] 🟡 `crontab(minute="*/120")` (`celery_app.py:26`) is invalid (minutes 0-59);
+  runs hourly, not every 2h.
+- [ ] 🟡 `PriorAuthUpdate` allows arbitrary status/decision writes via PUT,
+  bypassing the state machine. Restrict mutable fields.
+- [ ] 🟡 Deployment bypasses Alembic (`start.sh` uses `create_all`, continues on
+  failure) — run `alembic upgrade head` in the container instead.
+- [ ] 🟡 `/health` hardcodes `redis="connected"`; actually ping Redis.
+- [ ] 🟡 Missing FK indexes (communications/documents/appeals/agent_executions
+  → prior_auth_id); add a migration.
+- [ ] 🟡 Analytics endpoints return hardcoded/fabricated numbers
+  (`analytics.py:48-56, 80-87`; "approved_today" is actually all-time). Compute
+  real values or label clearly.
+- [ ] ⚪ Delete committed `backend/test.db` / `test_integration.db`; they're in
+  .gitignore's spirit but tracked.
+- [ ] ⚪ Test suite is 20 trivial tests; one asserts the insurance stub returns
+  stub data. Add tests for: auth, webhooks, JSON-parse failure, orchestrator
+  cycle guard, encryption round-trip.
+- [ ] ⚪ Docker runs as root; add non-root user, `.dockerignore` (venv/test DBs
+  currently baked into the image via `COPY . .`), and a HEALTHCHECK. No CI at
+  all — add GitHub Actions (lint + tests + docker build on PR).
+- [ ] 🟡 **README claims OCR/Vision but no image bytes are ever sent to Claude** —
+  `prescription_intake.py` builds a plain-text prompt; uploads are never written
+  to disk; Dockerfile installs tesseract/poppler that no code uses. Implement
+  vision intake (Claude supports image blocks) or drop the claim.
+- [ ] 🟡 **No backup story** — single pgdata volume; `make clean` runs
+  `docker compose down -v` and silently destroys all data. Add a pg_dump
+  target + warning prompt on clean.
+- [ ] 🟡 Compose gaps: no healthcheck/restart policy on api/celery services,
+  celery depends_on api instead of db/redis health, `--reload` dev server is
+  the only config, pgAdmin `admin/admin` bundled in "full stack".
+
+## P2 — Frontend: professionalism & de-AI-ification
+
+**Brand reference (usahealthcare.ai):** teal accent on clinical white/slate,
+stat cards, status/phase badges, initials avatars, dense confident copy.
+The dashboard's dark-slate sidebar + teal is on-brand — standardize on it.
+
+- [ ] 🟠 **Kill the emoji icons** — the loudest AI tell in the app:
+  `communications/page.tsx:26-32,59` (📠 📧 💬 📞 🖥️ 📨) and
+  `prior-auths/page.tsx:90` (⚠️). Use lucide-react (already installed).
+- [ ] 🟠 **Unify the two design generations.** Half the pages use teal accent +
+  `p-8` + micro type scale; the other half (prior-auths, appeals,
+  communications, analytics, settings) use **emerald** + `p-6` + `text-sm`.
+  Two accent colors on adjacent pages reads as iterative AI generation.
+  Pick teal, one spacing scale, one type scale.
+- [ ] 🟠 **Replace the dashboard hero banner** (`dashboard/page.tsx:64-74`) —
+  gradient panel with floating blurred orbs + "let AI agents handle the heavy
+  lifting" copy is a top-tier AI-generated tell and wastes 140px. Replace with
+  a dense "Needs attention" queue (escalated + stalled PAs).
+- [ ] 🟠 **Surface API errors.** Every page catches errors with `console.error`
+  and renders empty-state UI — backend down looks identical to "no data" ($0
+  revenue, "No prior authorizations yet"). Dangerous for an ops tool. Use the
+  existing (unused) `ApiError` class; add error banners + retry.
+- [ ] 🟠 **PA queue shows no patient or drug names** — columns are UUID, status,
+  agent, priority, date (`prior-auths/page.tsx:58-91`, dashboard table). A
+  pharmacist can't tell which row is which patient/med. Add patient, drug,
+  payer, case-age columns.
+- [ ] 🟠 **Confirm destructive actions** — "Mark Approved" / "Cancel" / "Escalate"
+  fire on single click, no confirm, no try/catch, then `window.location.reload()`
+  (`prior-auths/[id]/page.tsx:79-105`).
+- [ ] 🟡 **De-fake the chrome**: search button and notification bell do nothing
+  (`Header.tsx:10-21`); "Online" badge never checks health; hardcoded
+  "Pharmacy Staff / staff@pharmacy.com" (`Sidebar.tsx:80-81`); Settings page
+  entirely inert; dashboard trend arrows hardcoded `trend="up"`. Wire or remove.
+- [ ] 🟡 **Extract components**: Input, Button, Table, EmptyState, Spinner —
+  the ~120-char input className is pasted ~15×; table scaffold duplicated 6×;
+  status-prettifier regex duplicated 5×. Wire the dead CSS variables in
+  `globals.css:6-11` (defined, never referenced) into these components.
+- [ ] 🟡 **Delete create-next-app boilerplate**: stock `app/README.md`, unused
+  `public/*.svg` (next, vercel, globe, window, file), unused `framer-motion`
+  dep. Delete duplicated `frontend/api-client/` (byte-identical copy of
+  `src/lib/` that will drift).
+- [ ] 🟡 **Accessibility pass**: zero aria attributes in the app; logout is a
+  bare icon (not a button, does nothing); 11-12px slate-400 text fails WCAG AA
+  contrast; sidebar renders on /login (covered visually, still in tab order).
+- [ ] 🟡 **Ops-tool table stakes**: pagination (hard limit:50), sorting, search
+  on the queue, date filters, polling/refresh (statuses change constantly —
+  the premise of the product), debounced patient search (currently fires per
+  keystroke, race-prone).
+- [ ] 🟡 Intake form demands a raw patient UUID (`intake/page.tsx:87`) — needs a
+  patient typeahead. No document upload UI despite `awaiting_records` status
+  and a ready client method. Appeals page is read-only (can't create one).
+- [ ] ⚪ Fix `NEXT_PUBLIC_API_URL` fallback (`lib/api.ts:4`) — deployed build
+  silently calls localhost:8000. Fail loudly or use relative URLs.
+- [ ] ⚪ Encode query params in `client.ts:229,234,242` (bare string interpolation).
+- [ ] ⚪ Status filter chips cover 5 of 22 statuses; add the human-action states
+  (awaiting_records, doctor_outreach). Priority shown as bare 1-10 number —
+  add a legend or High/Med/Low label.
+
+**Keep (already good):** StatusBadge (all 22 statuses, consistent), lib/client.ts
+architecture, lib/types.ts domain modeling, dark-sidebar shell, Geist + mono for
+IDs, KPI selection on dashboard, illustrated empty states, agent timeline concept.
+
+## P3 — Docs, honesty, and optics
+
+- [ ] 🟡 README architecture/feature claims vs reality — add an explicit
+  "Current status: X real, Y simulated" section. Silently-fake features are
+  worse optics than an honest roadmap (the marketing site already does
+  phase-labels well — mirror that).
+- [ ] 🟡 The "16 agents" are one agent class with 16 prompts; `get_tools()` is a
+  dead hook, `agents/tools/` is empty, revenue_analytics is registered but in
+  no workflow transition. Either differentiate them or consolidate honestly
+  (~6 real components). At minimum stop instantiating all 16 (each with its own
+  Anthropic client) per request.
+- [ ] 🟡 Repo is named `UnitedHealthCareAI` but the product is `usahealthcare.ai`.
+  UnitedHealthcare is a real insurer with active trademarks — rename the repo
+  to avoid trademark exposure and confusion.
+- [ ] 🟡 **ARCHITECTURE.md claims components that don't exist**: "JWT/API Key
+  auth, rate limiting, audit logging" at the gateway (main.py has only CORS);
+  Langfuse service on port 3001 (not in compose, never initialized);
+  "pgvector formulary embeddings for RAG" (zero vector code — pip dep only).
+  Fix the diagram or build the pieces.
+- [ ] 🟡 **Reconcile the migration story**: DEPLOYMENT.md says `RUN alembic
+  upgrade head` in the Dockerfile (build-time — can never work); actual deploy
+  uses undocumented `start.sh` with `create_all`. Also SETUP.md/HANDOFF.md tell
+  a new dev to autogenerate the initial migration that already exists
+  (`alembic/versions/001_initial_schema.py`) — following the docs creates a
+  broken duplicate.
+- [ ] 🟡 **Unify model naming across docs**: HANDOFF.md says Sonnet 4 (3 places,
+  with Sonnet pricing), config/.env say `claude-haiku-4-5-20251001`, and a
+  commit message says "Haiku 3.5". Fix HANDOFF's model + cost estimates.
+- [ ] 🟡 WORKFLOW.md presents "~59 min saved per PA" / "20 hours daily" as
+  measured fact for a system with simulated integrations. Reframe as projected.
+- [ ] ⚪ Frontend onboarding is undocumented — README calls `frontend/` a
+  "reference", but it's the deployed app. Document `npm run dev`; note that
+  `frontend/api-client/` is a stale duplicate slated for deletion.
+- [ ] ⚪ `make health` pipes to `python -m json.tool` — fails on stock macOS
+  (only `python3` exists). Use `python3`.
+- [ ] ⚪ DEPLOYMENT.md is honest and good; move the Railway/Vercel env-var lists
+  into .env.example comments so they can't drift.
+
+---
+
+## Suggested execution order
+
+1. **Session A (safety):** P0 items — simulation flagging, auth wiring
+   (User model, login, protect routes, wire frontend login), webhook auth,
+   remove seed-demo, honest HIPAA doc.
+2. **Session B (backend hardening):** orchestrator loop guard, Celery dispatch,
+   retry, transactions, file storage, locking.
+3. **Session C (frontend unification):** one design system pass — kill emojis,
+   unify teal, extract components, replace hero, error surfacing, queue columns.
+4. **Session D (ops features + polish):** pagination/search/polling, a11y,
+   CI, tests, docs truth pass.
+
+## Progress log
+
+- 2026-07-22 — Review completed; this plan created. Nothing checked off yet.
