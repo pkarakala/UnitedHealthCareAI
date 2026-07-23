@@ -1,6 +1,11 @@
 #!/bin/bash
 set -e
 
+# Default DEBUG to false in production if not explicitly set
+if [[ "${APP_ENV,,}" == "production" || "${APP_ENV,,}" == "prod" ]] && [[ -z "${DEBUG}" ]]; then
+    export DEBUG=false
+fi
+
 # Databases created before Alembic was wired in (via create_all) have tables
 # but no alembic_version row. Stamp those at the baseline revision so
 # `upgrade head` only applies migrations added since.

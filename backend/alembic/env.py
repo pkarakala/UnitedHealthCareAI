@@ -1,17 +1,20 @@
 import asyncio
+import os
 from logging.config import fileConfig
 
 from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
-from app.config import settings
 from app.models import Base
 
 config = context.config
-# Strip to tolerate trailing whitespace/newlines in platform-provided URLs
-# (see start.sh history: Railway appends a newline to DATABASE_URL).
-config.set_main_option("sqlalchemy.url", settings.database_url.strip())
+
+db_url = os.environ.get(
+    "DATABASE_URL",
+    "postgresql+asyncpg://pa_user:pa_pass@localhost:5432/prior_auth",
+).strip()
+config.set_main_option("sqlalchemy.url", db_url)
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)

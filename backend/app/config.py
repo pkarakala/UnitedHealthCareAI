@@ -11,7 +11,7 @@ INSECURE_DEFAULTS = {
 class Settings(BaseSettings):
     app_name: str = "Prior Authorization AI Platform"
     app_env: str = "development"
-    debug: bool = True
+    debug: bool = False
     log_level: str = "INFO"
 
     # Database
