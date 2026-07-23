@@ -55,10 +55,16 @@ that exists. For a healthcare startup, the gap between claims and reality is the
   (`encrypt_phi`/`decrypt_phi`: zero call sites; `AuditService`: zero call sites;
   auth: zero call sites). Rewrite as "Implemented / Partially implemented /
   Planned" table. Healthcare startups get burned by overclaiming.
-- [ ] 🟠 **Actually use `encrypt_phi` on PHI columns** (patient name/DOB/phone/email,
+- [x] 🟠 **Actually use `encrypt_phi` on PHI columns** (patient name/DOB/phone/email,
   clinical summaries) or explicitly document the decision not to. Also fix the
   hardcoded KDF salt (`encryption.py:14`) and cache the Fernet instance.
-- [ ] 🟠 **Actually call `AuditService.log`** from PHI-touching endpoints.
+  *(Session B: `EncryptedString` type on Patient.phone/email +
+  PriorAuth.clinical_summary/medical_necessity_letter; name/member_id left
+  plaintext for search — documented in the model; salt → `ENCRYPTION_SALT`;
+  Fernet cached; migration 004 widens phone/email to TEXT.)*
+- [x] 🟠 **Actually call `AuditService.log`** from PHI-touching endpoints.
+  *(Session B: request-scoped `AuditContext` dep captures user + IP; wired on
+  patient/PA create/read/update, PA timeline, cancel/escalate, doc download.)*
 - [x] 🟠 **Fail startup on default secrets in prod** — `config.py` ships
   `secret_key="change-me-in-production"`, default DB creds, `debug=True`.
   Add a prod-mode validator that refuses to boot with defaults.
@@ -70,34 +76,52 @@ that exists. For a healthcare startup, the gap between claims and reality is the
   "pending" → potential infinite Claude-call loop (unbounded token spend).
   Convert to a loop with max-depth + cycle guard.
   *(Done in Session A: max-depth guard of 8, hit in practice by a webhook test.)*
-- [ ] 🟠 **Workflow runs synchronously inside the HTTP request**
+- [x] 🟠 **Workflow runs synchronously inside the HTTP request**
   (`prescriptions.py:64-69`): 4+ sequential Claude calls, no timeout, no
   idempotency. Dispatch to Celery (it's already in the stack, unused for this).
-- [ ] 🟠 **Retry logic is a docstring** (`base.py:139` claims it; none exists;
+  *(Session B: `run_pa_workflow` task; intake splits `create_pa` (fast) from
+  `run_intake` (slow). Opt-in via `ASYNC_WORKFLOW` — defaults to inline
+  because Railway runs only uvicorn, no worker. Fixed task registration to
+  use `Celery(include=[...])`.)*
+- [x] 🟠 **Retry logic is a docstring** (`base.py:139` claims it; none exists;
   tenacity is in requirements, imported nowhere). Add tenacity retry on 429/529
-  to `call_claude`.
-- [ ] 🟠 **Status mutated before agent runs, commits scattered mid-workflow**
+  to `call_claude`. *(Session B: exponential backoff, 4 attempts, retries
+  429/529/connection/timeout; predicate keys on instance status_code since
+  anthropic 0.42 surfaces 529 as a generic APIStatusError.)*
+- [x] 🟠 **Status mutated before agent runs, commits scattered mid-workflow**
   (`orchestrator.py:302-305`, `base.py:128`, per-agent commits) — a failed agent
   strands the PA in the new status. Move status write after success; single
-  transaction boundary per transition.
-- [ ] 🟠 **File uploads silently discard bytes** (`prescriptions.py:38-41`,
+  transaction boundary per transition. *(Session B: agent runs BEFORE the
+  status write; failure/requires_human holds the transition;
+  `_commit_transition` writes status+current_agent in one commit. Also fixed a
+  latent bug where the approval agent mislabeled appeal_approved as approved.)*
+- [x] 🟠 **File uploads silently discard bytes** (`prescriptions.py:38-41`,
   `documents.py:20-40`) — DB row created, file never written. Write to disk/S3
-  or return 501 honestly.
-- [ ] 🟠 **Concurrent transitions unguarded** — webhook + Celery beat + manual
+  or return 501 honestly. *(Session B: `LocalStorage` service with traversal
+  guard + size cap; documents persist bytes and download streams them;
+  prescription image persisted. Railway-ephemeral caveat documented.)*
+- [x] 🟠 **Concurrent transitions unguarded** — webhook + Celery beat + manual
   advance can race on the same PA. Add row locking (`SELECT ... FOR UPDATE`)
-  or optimistic versioning.
-- [ ] 🟡 **Celery async misuse**: shared module-level asyncpg engine across
+  or optimistic versioning. *(Session B: both — `lock_version` column
+  (migration 005) with version-checked conditional UPDATE, plus
+  `SELECT ... FOR UPDATE` on read (Postgres; no-op on SQLite).)*
+- [x] 🟡 **Celery async misuse**: shared module-level asyncpg engine across
   `asyncio.run()` loops will hit "attached to a different loop" errors.
-  Create engine per task or use a sync engine in workers.
-- [ ] 🟡 `call_claude_json` fence-stripping is fragile (`base.py:189-195`) — no
+  Create engine per task or use a sync engine in workers. *(Session B:
+  `app/tasks/worker_db.py run_task` gives each task a fresh loop-local engine;
+  all 4 existing tasks refactored onto it.)*
+- [x] 🟡 `call_claude_json` fence-stripping is fragile (`base.py:189-195`) — no
   schema validation of Claude output before DB writes; `float(revenue)` can
   raise (`approval.py:88`). Validate with Pydantic; retry on parse failure.
+  *(Session B: retries on parse failure, guarantees a dict, optional Pydantic
+  schema, robust fence stripping; `float(revenue)` → `_coerce_money`.)*
 - [ ] 🟡 Error-path conditions are dead code — agents return `success=False` with
   a condition, but `advance()` only advances on success → silent stalls.
-- [ ] 🟡 `crontab(minute="*/120")` (`celery_app.py:26`) is invalid (minutes 0-59);
-  runs hourly, not every 2h.
-- [ ] 🟡 `PriorAuthUpdate` allows arbitrary status/decision writes via PUT,
-  bypassing the state machine. Restrict mutable fields.
+- [x] 🟡 `crontab(minute="*/120")` (`celery_app.py:26`) is invalid (minutes 0-59);
+  runs hourly, not every 2h. *(Session B: `crontab(minute=0, hour="*/2")`.)*
+- [x] 🟡 `PriorAuthUpdate` allows arbitrary status/decision writes via PUT,
+  bypassing the state machine. Restrict mutable fields. *(Session B: reduced to
+  notes/assigned_to/priority with extra="forbid"; frontend type synced.)*
 - [x] 🟡 Deployment bypasses Alembic (`start.sh` uses `create_all`, continues on
   failure) — run `alembic upgrade head` in the container instead.
   *(Done in Session A: start.sh stamps legacy create_all DBs at 001, then upgrades.)*
@@ -271,3 +295,41 @@ IDs, KPI selection on dashboard, illustrated empty states, agent timeline concep
     `python scripts/create_user.py <email> <password> --role admin` once;
     remaining P0 stragglers → Session B: wire `encrypt_phi` (+salt fix),
     `AuditService.log` on PHI endpoints.
+- 2026-07-22 — **Session B (backend hardening) complete.** Commits
+  8b91100..3b295d7 (10 commits). Both P0 stragglers + 8 P1 items:
+  - **PHI encryption at rest** (`8b91100`): `EncryptedString` type on
+    Patient.phone/email + PriorAuth.clinical_summary/medical_necessity_letter;
+    name/member_id left plaintext for ILIKE search (documented); salt →
+    `ENCRYPTION_SALT`; Fernet cached; migration 004 widens phone/email.
+  - **Audit logging** (`a6edaf3`): request-scoped `AuditContext` dep (user +
+    IP) on patient/PA create/read/update, PA timeline, cancel/escalate, doc
+    download. `get_current_user` stashes user on `request.state`.
+  - **Celery workflow dispatch + per-task engine** (`c3bffc7`): `run_pa_workflow`
+    task; intake splits create_pa/run_intake; opt-in `ASYNC_WORKFLOW`
+    (default inline — Railway has no worker); `Celery(include=[...])` fixes
+    registration; `worker_db.run_task` fixes the loop-binding bug across all
+    4 tasks.
+  - **call_claude retry** (`410bb78`): tenacity, 429/529/conn/timeout, 4
+    attempts.
+  - **Status-after-success** (`b7a7fba`): agent runs before status write;
+    failure holds the transition; one commit per transition; fixes the
+    appeal-mislabel bug.
+  - **File persistence** (`0c2d7fb`): `LocalStorage` (traversal guard, size
+    cap); documents/images actually written; download streams bytes;
+    Railway-ephemeral caveat in DEPLOYMENT.md.
+  - **Concurrency guard** (`cee93c1`): `lock_version` (migration 005) +
+    version-checked conditional UPDATE + `SELECT ... FOR UPDATE`.
+  - **call_claude_json validation** (`f22a016`): retry on parse failure,
+    dict guarantee, optional Pydantic schema; `_coerce_money` fixes the
+    `float(revenue)` crash.
+  - **Beat schedule + PriorAuthUpdate** (`3b295d7`): valid every-2h crontab;
+    PUT restricted to notes/assigned_to/priority (`extra="forbid"`).
+  - Tests 31 → 64, all passing. Frontend tsc clean. New migrations 004/005
+    (hand-written, chain 001→005, single head).
+  - **Deploy notes (new this session):** set `ENCRYPTION_SALT` on Railway
+    (constant forever — changing it breaks PHI decryption). Do NOT set
+    `ASYNC_WORKFLOW=true` unless a Celery worker service is added. Uploads
+    are on ephemeral disk — add a volume or S3 for durable PHI retention.
+  - **Not done (deferred):** error-path conditions are dead code
+    (`advance()` only advances on success) — left as its own item; touches
+    workflow routing semantics and deserves a focused pass.
