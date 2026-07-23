@@ -8,6 +8,7 @@ from app.database import get_db
 from app.models.prescription import Prescription
 from app.schemas.prescription import PrescriptionCreate, PrescriptionRead
 from app.agents.orchestrator import Orchestrator
+from app.services.storage import FileTooLargeError, get_storage
 
 router = APIRouter()
 
@@ -35,10 +36,16 @@ async def intake_prescription(
     """
     rx_id = str(uuid.uuid4())
 
-    # Save image if uploaded
+    # Persist the uploaded image if present.
     image_url = None
-    if image:
-        image_url = f"uploads/prescriptions/{rx_id}/{image.filename}"
+    if image is not None and image.filename:
+        storage = get_storage()
+        content = await image.read()
+        image_url = storage.build_path("prescriptions", rx_id, image.filename)
+        try:
+            storage.save(image_url, content)
+        except FileTooLargeError as e:
+            raise HTTPException(status_code=413, detail=str(e))
 
     prescription = Prescription(
         id=rx_id,

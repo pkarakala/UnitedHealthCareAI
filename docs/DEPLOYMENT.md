@@ -41,6 +41,12 @@
    LOG_LEVEL=INFO
    ```
 
+> **File storage:** uploaded documents/images are written to `UPLOAD_DIR`
+> (default `uploads/`) on the local filesystem. Railway's filesystem is
+> **ephemeral** — uploads are lost on redeploy. For production PHI retention,
+> mount a persistent volume or add an S3-backed storage backend
+> (`app/services/storage.py` is written to that interface).
+
 > **Workflow execution:** by default (`ASYNC_WORKFLOW` unset/false) the PA
 > workflow runs inline in the intake request. The Railway web service runs
 > only uvicorn — there is **no Celery worker** — so do **not** set

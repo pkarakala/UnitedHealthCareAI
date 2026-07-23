@@ -43,6 +43,13 @@ class Settings(BaseSettings):
     # fabricated data to the database.
     simulation_mode: bool = True
 
+    # File storage
+    # Directory for uploaded clinical documents / prescription images. NOTE:
+    # local disk is ephemeral on Railway (wiped on redeploy) — durable storage
+    # (S3/EFS) is required for production PHI retention. See LocalStorage.
+    upload_dir: str = "uploads"
+    max_upload_bytes: int = 25 * 1024 * 1024  # 25 MB
+
     # Workflow dispatch
     # When True, the PA workflow runs in a Celery worker instead of inline in the
     # HTTP request. REQUIRES a running Celery worker (see docker-compose

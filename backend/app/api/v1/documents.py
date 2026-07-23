@@ -1,11 +1,13 @@
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models.clinical_document import ClinicalDocument
 from app.services.audit_service import AuditContext, get_audit_context
+from app.services.storage import FileTooLargeError, LocalStorage, get_storage
 
 router = APIRouter()
 
@@ -16,10 +18,17 @@ async def upload_document(
     document_type: str = Form(...),
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
+    audit: AuditContext = Depends(get_audit_context),
+    storage: LocalStorage = Depends(get_storage),
 ):
     """Upload a clinical document for a PA case."""
     doc_id = str(uuid.uuid4())
-    file_path = f"uploads/documents/{prior_auth_id}/{doc_id}/{file.filename}"
+    content = await file.read()
+    file_path = storage.build_path("documents", prior_auth_id, file.filename)
+    try:
+        size = storage.save(file_path, content)
+    except FileTooLargeError as e:
+        raise HTTPException(status_code=413, detail=str(e))
 
     doc = ClinicalDocument(
         id=doc_id,
@@ -27,15 +36,17 @@ async def upload_document(
         document_type=document_type,
         file_name=file.filename,
         file_path=file_path,
-        file_size=file.size,
+        file_size=size,
         mime_type=file.content_type,
     )
     db.add(doc)
+    await audit.record("upload", "clinical_document", resource_id=doc_id)
     await db.commit()
 
     return {
         "document_id": doc_id,
         "file_name": file.filename,
+        "file_size": size,
         "status": "uploaded",
         "message": f"Document uploaded for PA {prior_auth_id}",
     }
@@ -73,18 +84,21 @@ async def download_document(
     doc_id: str,
     db: AsyncSession = Depends(get_db),
     audit: AuditContext = Depends(get_audit_context),
+    storage: LocalStorage = Depends(get_storage),
 ):
     doc = await db.get(ClinicalDocument, doc_id)
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
+    if not doc.file_path or not storage.exists(doc.file_path):
+        raise HTTPException(status_code=404, detail="Document bytes not found in storage")
+
     await audit.record("download", "clinical_document", resource_id=doc_id)
     await db.commit()
 
-    return {
-        "document_id": doc.id,
-        "file_name": doc.file_name,
-        "file_path": doc.file_path,
-        "mime_type": doc.mime_type,
-        "note": "In production, this would return the actual file via S3 presigned URL",
-    }
+    content = storage.read(doc.file_path)
+    return Response(
+        content=content,
+        media_type=doc.mime_type or "application/octet-stream",
+        headers={"Content-Disposition": f'attachment; filename="{doc.file_name}"'},
+    )
