@@ -39,7 +39,8 @@ import type {
 
 interface ClientConfig {
   baseUrl: string;
-  token?: string;
+  /** Called per-request so tokens set after module init are picked up. */
+  getToken?: () => string | null;
   onUnauthorized?: () => void;
 }
 
@@ -47,21 +48,13 @@ interface ClientConfig {
 
 class ApiBase {
   private baseUrl: string;
-  private token?: string;
+  private getToken?: () => string | null;
   private onUnauthorized?: () => void;
 
   constructor(config: ClientConfig) {
     this.baseUrl = config.baseUrl.replace(/\/$/, "");
-    this.token = config.token;
+    this.getToken = config.getToken;
     this.onUnauthorized = config.onUnauthorized;
-  }
-
-  setToken(token: string) {
-    this.token = token;
-  }
-
-  clearToken() {
-    this.token = undefined;
   }
 
   private async request<T>(
@@ -81,8 +74,9 @@ class ApiBase {
     }
 
     const headers: Record<string, string> = {};
-    if (this.token) {
-      headers["Authorization"] = `Bearer ${this.token}`;
+    const token = this.getToken?.();
+    if (token) {
+      headers["Authorization"] = `Bearer ${token}`;
     }
     if (body && !(body instanceof FormData)) {
       headers["Content-Type"] = "application/json";
@@ -144,6 +138,21 @@ export class PAClient extends ApiBase {
   health = {
     check: () => this.get<HealthCheck>("/health"),
     ready: () => this.get<{ ready: boolean }>("/health/ready"),
+  };
+
+  // ── Auth ────────────────────────────────────────────────────────────────
+
+  auth = {
+    login: (email: string, password: string) =>
+      this.post<{ access_token: string; token_type: string }>("/auth/login", {
+        email,
+        password,
+      }),
+
+    me: () =>
+      this.get<{ id: string; email: string; full_name: string | null; role: string }>(
+        "/auth/me"
+      ),
   };
 
   // ── Patients ────────────────────────────────────────────────────────────

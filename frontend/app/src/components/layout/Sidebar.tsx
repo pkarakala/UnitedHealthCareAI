@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { clearToken } from "@/lib/auth";
 import {
   LayoutDashboard,
   ClipboardList,
@@ -28,6 +29,12 @@ const navigation = [
 
 export default function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
+
+  function handleLogout() {
+    clearToken();
+    router.push("/login");
+  }
 
   return (
     <aside className="w-[260px] bg-[#0f172a] text-white min-h-screen flex flex-col fixed left-0 top-0 z-50">
@@ -80,7 +87,9 @@ export default function Sidebar() {
             <p className="text-[12px] font-medium text-slate-300 truncate">Pharmacy Staff</p>
             <p className="text-[10px] text-slate-500 truncate">staff@pharmacy.com</p>
           </div>
-          <LogOut className="w-4 h-4 text-slate-500 hover:text-slate-300 cursor-pointer transition-colors" />
+          <button onClick={handleLogout} aria-label="Sign out" title="Sign out">
+            <LogOut className="w-4 h-4 text-slate-500 hover:text-slate-300 cursor-pointer transition-colors" />
+          </button>
         </div>
       </div>
     </aside>
