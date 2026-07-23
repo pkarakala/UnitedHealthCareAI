@@ -271,11 +271,30 @@ class Orchestrator:
 
         return pa.id
 
-    async def advance(self, prior_auth_id: str, condition: str | None = None) -> AgentResult | None:
+    # Ceiling on chained auto-advances per external trigger. Prevents unbounded
+    # Claude spend from self-transitions (e.g. PENDING_REVIEW -> pending -> ...).
+    MAX_ADVANCE_DEPTH = 8
+
+    async def advance(
+        self,
+        prior_auth_id: str,
+        condition: str | None = None,
+        _depth: int = 0,
+    ) -> AgentResult | None:
         """
         Advance a PA case through the workflow.
         Finds the matching transition, updates state, runs the next agent.
         """
+        if _depth >= self.MAX_ADVANCE_DEPTH:
+            logger.warning(
+                "workflow.max_depth_reached",
+                prior_auth_id=prior_auth_id,
+                depth=_depth,
+            )
+            return AgentResult(
+                success=True,
+                message="Workflow paused: max auto-advance depth reached",
+            )
         pa = await self.db.get(PriorAuth, prior_auth_id)
         if not pa:
             logger.error("workflow.pa_not_found", prior_auth_id=prior_auth_id)
@@ -331,12 +350,12 @@ class Orchestrator:
             # Auto-advance if agent completed successfully and provides a condition
             if result.success and not result.requires_human:
                 if result.condition:
-                    await self.advance(prior_auth_id, condition=result.condition)
+                    await self.advance(prior_auth_id, condition=result.condition, _depth=_depth + 1)
                 elif result.next_agent:
                     # Agent explicitly requested next step
                     next_transitions = WORKFLOW_TRANSITIONS.get(PAStatus(pa.status), [])
                     if next_transitions and len(next_transitions) == 1:
-                        await self.advance(prior_auth_id)
+                        await self.advance(prior_auth_id, _depth=_depth + 1)
 
             return result
 
@@ -344,7 +363,7 @@ class Orchestrator:
         # Check if we should auto-advance further
         next_transitions = WORKFLOW_TRANSITIONS.get(transition.next_status, [])
         if next_transitions and len(next_transitions) == 1 and next_transitions[0].condition is None:
-            await self.advance(prior_auth_id)
+            await self.advance(prior_auth_id, _depth=_depth + 1)
 
         return AgentResult(success=True, message=f"Transitioned to {transition.next_status.value}")
 

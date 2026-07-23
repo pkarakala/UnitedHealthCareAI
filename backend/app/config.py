@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     # Security
     secret_key: str = "change-me-in-production"
     encryption_key: str = "change-me-32-byte-key-for-aes256"
+    # Shared secret for inbound webhook HMAC signatures (X-Webhook-Signature).
+    # Webhooks are rejected until this is set.
+    webhook_secret: str = ""
     access_token_expire_minutes: int = 60
     algorithm: str = "HS256"
 
