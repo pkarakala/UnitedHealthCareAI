@@ -32,11 +32,12 @@ celery.conf.update(
 celery.conf.beat_schedule = {
     "monitor-pending-pas": {
         "task": "app.tasks.monitoring_tasks.check_pending_authorizations",
-        "schedule": crontab(minute="*/120"),  # every 2 hours
+        # minute="*/120" was invalid (minutes are 0-59) and silently ran hourly.
+        "schedule": crontab(minute=0, hour="*/2"),  # every 2 hours
     },
     "process-followups": {
         "task": "app.tasks.followup_tasks.process_scheduled_followups",
-        "schedule": crontab(minute="*/60"),  # every hour
+        "schedule": crontab(minute=0),  # every hour, on the hour
     },
     "nightly-analytics-rollup": {
         "task": "app.tasks.analytics_tasks.compute_daily_metrics",

@@ -138,13 +138,10 @@ export interface PriorAuthCreate {
   notes?: string | null;
 }
 
+// Only human-editable fields. status/decision/etc. are driven by the workflow
+// state machine (advance/cancel/escalate/webhooks), not this PUT — the backend
+// rejects extra fields with 422.
 export interface PriorAuthUpdate {
-  status?: string | null;
-  sub_status?: string | null;
-  pa_number?: string | null;
-  submission_method?: string | null;
-  decision?: string | null;
-  denial_reason?: string | null;
   notes?: string | null;
   assigned_to?: string | null;
   priority?: number | null;

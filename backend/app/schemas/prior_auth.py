@@ -12,15 +12,20 @@ class PriorAuthCreate(BaseModel):
 
 
 class PriorAuthUpdate(BaseModel):
-    status: str | None = None
-    sub_status: str | None = None
-    pa_number: str | None = None
-    submission_method: str | None = None
-    decision: str | None = None
-    denial_reason: str | None = None
+    """
+    Human-editable PA fields via PUT /prior-auths/{id}.
+
+    Deliberately excludes status/sub_status/decision/denial_reason/pa_number/
+    submission_method: those are driven by the workflow state machine
+    (orchestrator, webhooks, agents), and letting a raw PUT set them would
+    bypass the state machine and its concurrency guards. Use /advance,
+    /cancel, /escalate, or the webhook endpoints to change PA state.
+    """
     notes: str | None = None
     assigned_to: str | None = None
     priority: int | None = None
+
+    model_config = {"extra": "forbid"}
 
 
 class PriorAuthRead(BaseModel):
