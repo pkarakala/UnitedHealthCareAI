@@ -22,8 +22,8 @@ class Settings(BaseSettings):
 
     # Anthropic
     anthropic_api_key: str = ""
-    default_model: str = "claude-sonnet-4-20250514"
-    max_tokens: int = 4096
+    default_model: str = "claude-haiku-4-5-20251001"
+    max_tokens: int = 2048
 
     # CORS
     cors_origins: str = "http://localhost:3000,https://usahealthcare.ai"
