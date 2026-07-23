@@ -1,9 +1,23 @@
 import json
+import re
 from datetime import datetime, timezone
 from app.agents.base import BaseAgent, AgentContext, AgentResult
 from app.models.prior_auth import PriorAuth
 from app.models.prescription import Prescription
 from app.models.communication import Communication
+
+
+def _coerce_money(value) -> float:
+    """Best-effort parse of an LLM-provided monetary value into a float."""
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        cleaned = re.sub(r"[^0-9.\-]", "", value)
+        try:
+            return float(cleaned) if cleaned not in ("", "-", ".", "-.") else 0.0
+        except ValueError:
+            return 0.0
+    return 0.0
 
 
 class ApprovalAgent(BaseAgent):
@@ -73,10 +87,9 @@ claim handling, technician instructions, and patient notification."""
         try:
             result_data, tokens_in, tokens_out = await self.call_claude_json(user_message)
 
-            # Update PA with revenue data
-            revenue = result_data.get("revenue_impact", 0)
-            if revenue:
-                pa.revenue_recovered = float(revenue) if isinstance(revenue, (int, float, str)) else 0
+            # Update PA with revenue data. Claude may return a non-numeric
+            # string (e.g. "TBD", "$1,200"), so coerce defensively.
+            pa.revenue_recovered = _coerce_money(result_data.get("revenue_impact"))
 
             pa.status = "approved"
             pa.sub_status = "ready_to_fill"

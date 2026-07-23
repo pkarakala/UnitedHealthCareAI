@@ -68,6 +68,20 @@ class SimulationDisabledError(RuntimeError):
     """Raised when a simulating agent runs with simulation_mode=False."""
 
 
+class ClaudeJSONError(ValueError):
+    """Raised when Claude fails to return valid JSON after all parse attempts."""
+
+
+def _strip_json_fence(text: str) -> str:
+    """Remove a leading ```json / ``` code fence and trailing ``` if present."""
+    text = text.strip()
+    if not text.startswith("```"):
+        return text
+    # Drop the opening fence line (``` or ```json) and any trailing fence.
+    without_open = text.split("\n", 1)[1] if "\n" in text else ""
+    return without_open.rsplit("```", 1)[0].strip()
+
+
 class BaseAgent(ABC):
     """
     Abstract base class for all 16 PA workflow agents.
@@ -250,25 +264,77 @@ class BaseAgent(ABC):
         self,
         user_message: str,
         system: str | None = None,
+        schema: type[BaseModel] | None = None,
+        max_parse_attempts: int = 2,
     ) -> tuple[dict, int, int]:
         """
-        Claude call expecting JSON output. Parses the response.
-        Returns (parsed_dict, input_tokens, output_tokens).
+        Claude call expecting a JSON object.
+
+        Retries up to max_parse_attempts times if the model returns something
+        that isn't a valid JSON object (or, when schema is given, doesn't
+        validate against it) — a separate concern from call_claude's transient
+        network retries. Always returns a dict so callers' .get() is safe; when
+        schema is provided the dict is the validated model's dump.
+
+        Returns (parsed_dict, input_tokens, output_tokens) with token counts
+        summed across attempts.
         """
         import json
+
+        from pydantic import ValidationError
 
         prompt = system or self.get_system_prompt()
         prompt += "\n\nRespond ONLY with valid JSON. No markdown, no explanation."
 
-        response = await self.call_claude(
-            messages=[{"role": "user", "content": user_message}],
-            system=prompt,
+        total_in = total_out = 0
+        last_error: Exception | None = None
+
+        for attempt in range(1, max_parse_attempts + 1):
+            response = await self.call_claude(
+                messages=[{"role": "user", "content": user_message}],
+                system=prompt,
+            )
+            total_in += response.usage.input_tokens
+            total_out += response.usage.output_tokens
+            text = _strip_json_fence(response.content[0].text)
+
+            try:
+                parsed = json.loads(text)
+            except (json.JSONDecodeError, ValueError) as e:
+                last_error = e
+                logger.warning(
+                    "claude_json.parse_failed",
+                    agent=self.agent_name,
+                    attempt=attempt,
+                    error=str(e),
+                )
+                continue
+
+            if not isinstance(parsed, dict):
+                last_error = ValueError(f"Expected JSON object, got {type(parsed).__name__}")
+                logger.warning(
+                    "claude_json.not_an_object",
+                    agent=self.agent_name,
+                    attempt=attempt,
+                    got=type(parsed).__name__,
+                )
+                continue
+
+            if schema is not None:
+                try:
+                    parsed = schema.model_validate(parsed).model_dump()
+                except ValidationError as e:
+                    last_error = e
+                    logger.warning(
+                        "claude_json.schema_invalid",
+                        agent=self.agent_name,
+                        attempt=attempt,
+                        error=str(e),
+                    )
+                    continue
+
+            return parsed, total_in, total_out
+
+        raise ClaudeJSONError(
+            f"Claude did not return valid JSON after {max_parse_attempts} attempts: {last_error}"
         )
-        text = response.content[0].text
-
-        # Handle potential markdown wrapping
-        if text.startswith("```"):
-            text = text.split("\n", 1)[1].rsplit("```", 1)[0]
-
-        parsed = json.loads(text)
-        return parsed, response.usage.input_tokens, response.usage.output_tokens
