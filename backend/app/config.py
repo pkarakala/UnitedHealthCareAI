@@ -43,6 +43,13 @@ class Settings(BaseSettings):
     # fabricated data to the database.
     simulation_mode: bool = True
 
+    # Workflow dispatch
+    # When True, the PA workflow runs in a Celery worker instead of inline in the
+    # HTTP request. REQUIRES a running Celery worker (see docker-compose
+    # celery-worker; NOT started by start.sh on Railway) — otherwise dispatched
+    # PAs sit unprocessed. Defaults False so the workflow always runs somewhere.
+    async_workflow: bool = False
+
     # CORS
     cors_origins: str = "http://localhost:3000,https://usahealthcare.ai"
 

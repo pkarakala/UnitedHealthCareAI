@@ -6,6 +6,16 @@ celery = Celery(
     "prior_auth",
     broker=settings.redis_url,
     backend=settings.redis_url,
+    # Import task modules on worker startup so their @celery.task decorators
+    # register. (autodiscover_tasks looks for a `tasks` submodule per package,
+    # which these module names are not, so it wouldn't find them.)
+    include=[
+        "app.tasks.workflow_tasks",
+        "app.tasks.monitoring_tasks",
+        "app.tasks.followup_tasks",
+        "app.tasks.analytics_tasks",
+        "app.tasks.notification_tasks",
+    ],
 )
 
 celery.conf.update(
@@ -34,4 +44,3 @@ celery.conf.beat_schedule = {
     },
 }
 
-celery.autodiscover_tasks(["app.tasks"])

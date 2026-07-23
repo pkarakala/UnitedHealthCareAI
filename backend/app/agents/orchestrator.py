@@ -235,11 +235,8 @@ class Orchestrator:
     def get_agent(self, name: str) -> BaseAgent | None:
         return self._agent_registry.get(name)
 
-    async def start_workflow(self, prescription_id: str, patient_id: str, insurance_id: str | None = None) -> str:
-        """
-        Entry point: creates a PA case and runs the intake agent.
-        Returns the prior_auth_id.
-        """
+    async def create_pa(self, prescription_id: str, patient_id: str, insurance_id: str | None = None) -> str:
+        """Create the PA row in INTAKE and return its id. Does not run any agent."""
         import uuid
 
         pa = PriorAuth(
@@ -254,14 +251,20 @@ class Orchestrator:
         await self.db.commit()
         await self.db.refresh(pa)
 
-        logger.info("workflow.started", prior_auth_id=pa.id, prescription_id=prescription_id)
+        logger.info("workflow.pa_created", prior_auth_id=pa.id, prescription_id=prescription_id)
+        return pa.id
 
-        # Run intake agent
+    async def run_intake(self, prior_auth_id: str) -> AgentResult:
+        """Run the intake agent on an existing PA and auto-advance from INTAKE."""
+        pa = await self.db.get(PriorAuth, prior_auth_id)
+        if not pa:
+            return AgentResult(success=False, error="PA not found")
+
         context = AgentContext(
             prior_auth_id=pa.id,
-            patient_id=patient_id,
-            prescription_id=prescription_id,
-            insurance_id=insurance_id,
+            patient_id=pa.patient_id,
+            prescription_id=pa.prescription_id,
+            insurance_id=pa.insurance_id,
         )
         intake_agent = self._agent_registry["prescription_intake"]
         result = await intake_agent.run(context)
@@ -269,7 +272,18 @@ class Orchestrator:
         if result.success:
             await self.advance(pa.id, condition=result.condition)
 
-        return pa.id
+        return result
+
+    async def start_workflow(self, prescription_id: str, patient_id: str, insurance_id: str | None = None) -> str:
+        """
+        Entry point: creates a PA case and runs the intake agent inline.
+        Returns the prior_auth_id. For out-of-band execution, use create_pa()
+        and dispatch run_pa_workflow instead.
+        """
+        pa_id = await self.create_pa(prescription_id, patient_id, insurance_id)
+        logger.info("workflow.started", prior_auth_id=pa_id, prescription_id=prescription_id)
+        await self.run_intake(pa_id)
+        return pa_id
 
     # Ceiling on chained auto-advances per external trigger. Prevents unbounded
     # Claude spend from self-transitions (e.g. PENDING_REVIEW -> pending -> ...).

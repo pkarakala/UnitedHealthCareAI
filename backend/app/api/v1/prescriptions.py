@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.database import get_db
 from app.models.prescription import Prescription
 from app.schemas.prescription import PrescriptionCreate, PrescriptionRead
@@ -59,18 +60,30 @@ async def intake_prescription(
     db.add(prescription)
     await db.commit()
 
-    # Start the PA workflow
+    # Create the PA row synchronously so we can return its id immediately.
     orchestrator = Orchestrator(db)
-    pa_id = await orchestrator.start_workflow(
+    pa_id = await orchestrator.create_pa(
         prescription_id=rx_id,
         patient_id=patient_id,
         insurance_id=insurance_id,
     )
 
+    if settings.async_workflow:
+        # Hand the multi-agent workflow to a Celery worker so the request
+        # doesn't block on several sequential Claude calls.
+        from app.tasks.workflow_tasks import run_pa_workflow
+
+        run_pa_workflow.delay(pa_id)
+        workflow_status = "workflow_queued"
+    else:
+        # Inline execution (default): runs the workflow before responding.
+        await orchestrator.run_intake(pa_id)
+        workflow_status = "workflow_started"
+
     return {
         "prescription_id": rx_id,
         "prior_auth_id": pa_id,
-        "status": "workflow_started",
+        "status": workflow_status,
         "message": f"Prescription intake complete. PA workflow initiated for {drug_name}.",
     }
 
