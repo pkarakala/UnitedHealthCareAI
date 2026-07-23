@@ -13,7 +13,17 @@ from app.database import get_db
 from app.models.base import Base
 from app.models.prior_auth import PriorAuth
 from app.models.agent_execution import AgentExecution
+from app.models.user import User
+from app.security import get_current_user
 from app.utils.constants import PAStatus
+
+TEST_USER = User(
+    id="itest-user-id",
+    email="itest@pharmacy.test",
+    hashed_password="not-a-real-hash",
+    role="admin",
+    is_active=True,
+)
 
 TEST_DB_URL = "sqlite+aiosqlite:///./test_integration.db"
 engine = create_async_engine(TEST_DB_URL, echo=False)
@@ -120,6 +130,7 @@ async def client(db_session):
         yield db_session
 
     app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_current_user] = lambda: TEST_USER
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac

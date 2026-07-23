@@ -8,8 +8,10 @@ from app.models.communication import Communication
 from app.models.appeal import Appeal
 from app.models.audit_log import AuditLog
 from app.models.agent_execution import AgentExecution
+from app.models.user import User
 
 __all__ = [
+    "User",
     "Base",
     "AuditMixin",
     "Patient",
