@@ -1,150 +1,65 @@
-# HIPAA Compliance Considerations
+# HIPAA Compliance — Current Status
 
-This document outlines the security and compliance measures built into the platform for handling Protected Health Information (PHI).
+**This platform is not yet HIPAA-compliant and must not process real PHI.**
 
-## What is PHI in This System?
+This document is an honest inventory of security controls: what is implemented
+and enforced, what exists as code but is only partially wired, and what is
+planned. It replaces an earlier version that described intended controls as if
+they were in place.
 
-The following data elements are PHI and require protection:
-- Patient names
-- Dates of birth
-- Phone numbers, email addresses
-- Medical record numbers / Member IDs
-- Prescription details (linked to a patient)
-- Diagnosis codes
-- Lab results
-- Clinical notes
-- Insurance information
+Last reviewed: 2026-07-22.
 
-## Security Controls
+## What would be PHI in this system
 
-### 1. Encryption at Rest
+If real patient data were loaded, these fields would be PHI and require full
+protection: patient names, dates of birth, phone/email, member IDs,
+prescription details, diagnosis codes, lab values, clinical notes, insurance
+information.
 
-**Implementation:** `backend/app/utils/encryption.py`
+**Today the system should only ever hold synthetic/demo data.** Several agents
+generate simulated clinical data (see `simulation_mode` in
+`backend/app/config.py`); PAs touched by them are flagged `is_simulated`.
 
-- All PHI fields are encrypted using AES-256 via the Fernet algorithm
-- Encryption key is stored as an environment variable (never in code)
-- Each field is encrypted individually before database storage
-- Decryption happens only at the application layer, not in DB queries
+## Control status
 
-**Production note:** Use AWS KMS or HashiCorp Vault for key management in production.
+| Control | Status | Reality |
+|---|---|---|
+| JWT authentication | **Implemented** | All API routes require a bearer token except `/health`, `/auth/login`, and signature-verified webhooks. Login resolves to a DB user (`users` table); inactive users are rejected. |
+| Role-based access control | **Partial** | Users carry a role (admin/pharmacist/technician/readonly) and `require_role()` exists, but only user-creation is role-gated. Data endpoints do not yet differentiate by role. |
+| Webhook authentication | **Implemented** | Inbound webhooks require an HMAC-SHA256 signature (`X-Webhook-Signature`); rejected if `WEBHOOK_SECRET` is unset. |
+| Audit logging | **Partial** | `AuditLog` model and `AuditService` exist; only logins are currently audited. PHI reads/writes are **not** yet logged. No immutability guarantee — rows live in the same Postgres DB with the same credentials. |
+| Field-level PHI encryption | **Not wired** | `encrypt_phi`/`decrypt_phi` (Fernet) exist in `backend/app/utils/encryption.py` but **no model or endpoint calls them**. Patient fields are stored in plaintext. The KDF also uses a hardcoded salt. |
+| Encryption in transit | **Partial** | Railway/Vercel terminate TLS in deployment. Nothing in the app enforces HTTPS; local compose runs plain HTTP. |
+| Encryption at rest (disk) | **Inherited** | Whatever the hosting provider (Railway Postgres) does. No application-level guarantee. |
+| Secrets hygiene | **Implemented** | App refuses to boot in production (`APP_ENV=production`) with default `SECRET_KEY`/`ENCRYPTION_KEY`, `DEBUG=true`, or dev DB credentials. |
+| Minimum-necessary for AI calls | **Partial** | `AgentContext` passes only IDs; agents load what they query. But prompts do include patient name/DOB where used, and there is no redaction layer. |
+| BAA with Anthropic | **Not in place** | Required before any real PHI goes to the Claude API. |
+| Data retention / deletion | **Not implemented** | No retention automation exists. The retention schedule below is a target, not a behavior. |
+| Breach notification procedures | **Not implemented** | No policy documents exist. |
 
-### 2. Encryption in Transit
+## Gaps to close before real PHI (in priority order)
 
-- All API traffic should use HTTPS (TLS 1.3)
-- Docker services communicate over an internal network
-- External integrations (CoverMyMeds, fax APIs) use TLS
+1. Wire `encrypt_phi` into PHI columns (or document a deliberate decision to
+   rely on disk-level encryption + access controls), fix the hardcoded KDF
+   salt, cache the Fernet instance.
+2. Call `AuditService.log` from every PHI-touching endpoint (reads and writes),
+   and move audit logs somewhere append-only.
+3. Apply `require_role` to data endpoints (e.g. readonly can't mutate PAs).
+4. Sign a BAA with Anthropic; strip direct identifiers from prompts.
+5. Retention automation, breach-notification policy, staff training, risk
+   assessment — the administrative safeguards.
+6. HTTPS enforcement at the app layer (HSTS, secure cookies if sessions are
+   added).
 
-### 3. Audit Logging
+## Administrative requirements not yet started
 
-**Implementation:** `backend/app/models/audit_log.py`, `backend/app/services/audit_service.py`
+Privacy policy, security policy, breach notification policy, BAAs (Anthropic,
+Railway, Vercel, any fax/SMS vendor), access-control policy, training program,
+annual risk assessment.
 
-Every data access is logged with:
-- Who accessed it (user_id)
-- What they accessed (resource_type, resource_id)
-- When (timestamp)
-- From where (IP address, user agent)
-- Whether PHI was accessed (phi_accessed flag)
-- Before/after values for modifications
+## Relevant HIPAA rules
 
-Audit logs are **immutable** — they can only be appended, never modified or deleted.
-
-### 4. Authentication & Authorization
-
-**Implementation:** `backend/app/security.py`
-
-- JWT-based authentication
-- Tokens expire after 60 minutes
-- Role-based access control:
-  - **admin**: Full access, user management
-  - **pharmacist**: Full workflow access
-  - **technician**: Limited to assigned tasks
-  - **readonly**: Dashboard and reporting only
-
-### 5. Minimum Necessary Access
-
-Each AI agent only receives the data it needs:
-- The `AgentContext` carries only IDs
-- Agents load specific records from the database
-- Agents don't have access to unrelated patient data
-
-### 6. AI/LLM Considerations
-
-**Critical for HIPAA compliance with AI:**
-
-- **Business Associate Agreement (BAA):** Required with Anthropic if sending PHI to Claude
-- **Data minimization:** Only send the minimum necessary PHI in prompts
-- **No training on PHI:** Confirm with Anthropic that data is not used for training
-- **Audit trail for AI:** Every Claude API call is logged (tokens, content summary)
-
-**Production recommendation:** Consider using a self-hosted LLM or Anthropic's API with a signed BAA for actual PHI processing.
-
-### 7. Data Retention
-
-- Active PA data: Retained for the life of the case + 7 years
-- Audit logs: Retained for 6 years (HIPAA requirement)
-- Communication logs: Retained for 6 years
-- AI execution logs: Retained for 3 years
-
-**Implementation:** A Celery task archives old records to cold storage.
-
-## HIPAA Administrative Requirements
-
-### Policies Needed for Production
-
-1. **Privacy Policy** — How PHI is collected, used, and disclosed
-2. **Security Policy** — Technical and administrative safeguards
-3. **Breach Notification Policy** — How to respond to data breaches
-4. **Business Associate Agreements** — With Anthropic, cloud providers, fax services
-5. **Access Control Policy** — Who can access what, and how access is granted/revoked
-6. **Training Program** — Staff training on HIPAA requirements
-
-### Risk Assessment Items
-
-| Risk | Mitigation |
-|------|-----------|
-| PHI sent to LLM provider | BAA with Anthropic; minimize data sent |
-| Database breach | Encryption at rest + field-level encryption |
-| Unauthorized access | JWT auth + RBAC + audit logging |
-| Staff device loss | No PHI stored on client devices; server-side only |
-| Fax misdirection | Confirm fax numbers before sending |
-| Webhook data exposure | HTTPS + signature verification on inbound webhooks |
-| Log exposure | PHI not included in application logs; audit log separate |
-
-## Implementation Checklist
-
-- [x] Field-level encryption for PHI (AES-256)
-- [x] Audit logging for all data access
-- [x] JWT authentication
-- [x] Role-based access control (framework)
-- [x] Agent execution logging
-- [x] Structured logging without PHI
-- [ ] HTTPS enforcement (configure in production)
-- [ ] BAA with Anthropic
-- [ ] BAA with cloud provider (AWS)
-- [ ] Data retention automation
-- [ ] Breach notification procedures
-- [ ] Penetration testing
-- [ ] Security awareness training
-
-## Environment-Specific Notes
-
-### Development (Current)
-- Running on localhost without HTTPS (acceptable for dev)
-- Using plain-text secrets in `.env` file
-- No BAA required for synthetic/test data
-
-### Production Requirements
-- HTTPS mandatory with valid TLS certificate
-- Secrets in AWS Secrets Manager or HashiCorp Vault
-- BAA with all vendors handling PHI
-- Network segmentation (VPC, security groups)
-- Regular vulnerability scanning
-- SOC 2 compliance recommended for enterprise customers
-- Annual HIPAA risk assessment
-
-## Relevant HIPAA Rules
-
-- **Privacy Rule (45 CFR Part 160, 164 Subparts A, E):** Governs use and disclosure of PHI
-- **Security Rule (45 CFR Part 160, 164 Subparts A, C):** Technical safeguards for ePHI
-- **Breach Notification Rule (45 CFR Part 164 Subpart D):** Required notifications after breach
-- **HITECH Act:** Increased penalties, extends requirements to business associates
+- **Privacy Rule** (45 CFR 160, 164 A/E) — use and disclosure of PHI
+- **Security Rule** (45 CFR 160, 164 A/C) — technical safeguards for ePHI
+- **Breach Notification Rule** (45 CFR 164 D)
+- **HITECH Act** — extends requirements to business associates
