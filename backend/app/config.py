@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     # Security
     secret_key: str = "change-me-in-production"
     encryption_key: str = "change-me-32-byte-key-for-aes256"
+    # Salt for the PHI-encryption KDF. Must stay constant for the lifetime of the
+    # data it protects — changing it makes existing ciphertext undecryptable.
+    encryption_salt: str = "prior-auth-phi-salt"
     # Shared secret for inbound webhook HMAC signatures (X-Webhook-Signature).
     # Webhooks are rejected until this is set.
     webhook_secret: str = ""

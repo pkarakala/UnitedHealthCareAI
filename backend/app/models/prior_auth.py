@@ -3,6 +3,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from datetime import datetime
 from app.models.base import Base, AuditMixin
 from app.utils.constants import PAStatus
+from app.utils.encryption import EncryptedString
 
 
 class PriorAuth(Base, AuditMixin):
@@ -43,9 +44,9 @@ class PriorAuth(Base, AuditMixin):
     denial_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     denial_codes: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
-    # Clinical
-    medical_necessity_letter: Mapped[str | None] = mapped_column(Text, nullable=True)
-    clinical_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Clinical (free-text PHI — encrypted at rest)
+    medical_necessity_letter: Mapped[str | None] = mapped_column(EncryptedString, nullable=True)
+    clinical_summary: Mapped[str | None] = mapped_column(EncryptedString, nullable=True)
     required_documents: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     collected_documents: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
